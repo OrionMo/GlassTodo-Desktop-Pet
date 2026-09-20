@@ -1,9 +1,20 @@
 const { contextBridge, ipcRenderer } = require('electron')
 
+const TASKS_KEY = 'glass-todo.tasks.v2'
+const TASKS_UPDATED_KEY = 'glass-todo.tasks.v2.updatedAt'
+
 try {
-  const persistedTasks = ipcRenderer.sendSync('tasks:load-sync')
-  if (Array.isArray(persistedTasks)) {
-    window.localStorage.setItem('glass-todo.tasks.v2', JSON.stringify(persistedTasks))
+  const serializedLocalTasks = window.localStorage.getItem(TASKS_KEY)
+  const localSnapshot = serializedLocalTasks
+    ? { tasks: JSON.parse(serializedLocalTasks), updatedAt: window.localStorage.getItem(TASKS_UPDATED_KEY) }
+    : null
+  const selected = ipcRenderer.sendSync('tasks:bootstrap-sync', localSnapshot)
+
+  if (selected) {
+    const updatedAt = selected.updatedAt || new Date().toISOString()
+    window.localStorage.setItem(TASKS_KEY, JSON.stringify(selected.tasks))
+    window.localStorage.setItem(TASKS_UPDATED_KEY, updatedAt)
+    ipcRenderer.sendSync('tasks:save-sync', { tasks: selected.tasks, updatedAt })
   }
 } catch {}
 

@@ -1,6 +1,7 @@
 const { app, BrowserWindow, ipcMain, Notification, screen } = require('electron')
 const path = require('node:path')
 const fs = require('node:fs')
+const { chooseTaskSnapshot } = require('./task-storage.cjs')
 
 // Transparent Electron windows can render as opaque rectangles on some
 // Windows GPU/driver combinations. Prefer the stable software compositor.
@@ -198,24 +199,38 @@ function getTasksFilePath() {
   return path.join(app.getPath('userData'), 'tasks.json')
 }
 
-function readPersistedTasks() {
+function readTaskSnapshotFrom(filePath) {
   try {
-    const filePath = getTasksFilePath()
     if (!fs.existsSync(filePath)) return null
     const stored = JSON.parse(fs.readFileSync(filePath, 'utf8'))
-    return Array.isArray(stored) ? stored : Array.isArray(stored?.tasks) ? stored.tasks : null
+    if (Array.isArray(stored)) return { tasks: stored, updatedAt: null }
+    return Array.isArray(stored?.tasks) ? { tasks: stored.tasks, updatedAt: stored.updatedAt || null } : null
   } catch {
     return null
   }
 }
 
-function writePersistedTasks(tasks) {
+function readPersistedTaskSnapshot() {
+  const filePath = getTasksFilePath()
+  return readTaskSnapshotFrom(filePath) || readTaskSnapshotFrom(`${filePath}.backup`)
+}
+
+function readPersistedTasks() {
+  return readPersistedTaskSnapshot()?.tasks || null
+}
+
+function writePersistedTasks(tasks, updatedAt = new Date().toISOString()) {
   if (!Array.isArray(tasks)) return false
   const signature = JSON.stringify(tasks)
   if (signature === lastTaskSignature) return true
   const filePath = getTasksFilePath()
+  const tempPath = `${filePath}.tmp`
+  const backupPath = `${filePath}.backup`
   fs.mkdirSync(path.dirname(filePath), { recursive: true })
-  fs.writeFileSync(filePath, JSON.stringify({ version: 1, updatedAt: new Date().toISOString(), tasks }, null, 2), 'utf8')
+  fs.writeFileSync(tempPath, JSON.stringify({ version: 1, updatedAt, tasks }, null, 2), 'utf8')
+  if (fs.existsSync(filePath)) fs.copyFileSync(filePath, backupPath)
+  fs.copyFileSync(tempPath, filePath)
+  fs.unlinkSync(tempPath)
   lastTaskSignature = signature
   return true
 }
@@ -303,7 +318,7 @@ async function runQA() {
   const expandedBounds = mainWindow.getBounds()
   const expandedImage = await mainWindow.webContents.capturePage()
   fs.writeFileSync(path.join(outputRoot, 'desktop-qa-expanded.png'), expandedImage.toPNG())
-  const unfinishedFlow = await mainWindow.webContents.executeJavaScript(`(async () => {
+  const ideaFlow = await mainWindow.webContents.executeJavaScript(`(async () => {
     const wait = (duration) => new Promise((resolve) => setTimeout(resolve, duration))
     const labels = [...document.querySelectorAll('.day-switcher button')].map((button) => button.textContent.trim())
     let firstRow = document.querySelector('.task-row')
@@ -320,16 +335,26 @@ async function runQA() {
     const title = firstRow?.querySelector('.task-title')?.textContent.trim() || null
     firstRow?.querySelector('.move-task-button')?.click()
     await wait(100)
-    ;[...document.querySelectorAll('.day-switcher button')].find((button) => button.textContent.trim() === '未完成')?.click()
+    ;[...document.querySelectorAll('.day-switcher button')].find((button) => button.textContent.trim() === '想法')?.click()
     await wait(100)
-    const unfinishedTitle = document.querySelector('.task-row .task-title')?.textContent.trim() || null
-    document.querySelector('.task-row .move-task-button')?.click()
+    const ideaTitle = document.querySelector('.task-row .task-title')?.textContent.trim() || null
+    const filters = [...document.querySelectorAll('.idea-filter button')].map((button) => button.textContent.trim())
+    document.querySelector('.task-row .idea-tags button')?.click()
+    await wait(100)
+    ;[...document.querySelectorAll('.idea-filter button')].find((button) => button.textContent.trim() === '符合当下目标')?.click()
+    await wait(100)
+    const goalFilteredTitle = document.querySelector('.task-row .task-title')?.textContent.trim() || null
+    document.querySelector('.task-row .idea-schedule-actions button[title="加入今天"]')?.click()
     await wait(100)
     ;[...document.querySelectorAll('.day-switcher button')].find((button) => button.textContent.trim() === '今天')?.click()
     await wait(100)
     const returnedTitles = [...document.querySelectorAll('.task-row .task-title')].map((node) => node.textContent.trim())
-    return { labels, title, movedToUnfinished: unfinishedTitle === title, returnedToToday: returnedTitles.includes(title) }
+    ;[...document.querySelectorAll('.day-switcher button')].find((button) => button.textContent.trim() === '想法')?.click()
+    await wait(100)
+    return { labels, filters, title, movedToIdeas: ideaTitle === title, goalFilterWorks: goalFilteredTitle === title, returnedToToday: returnedTitles.includes(title) }
   })()`)
+  const ideasImage = await mainWindow.webContents.capturePage()
+  fs.writeFileSync(path.join(outputRoot, 'desktop-qa-ideas.png'), ideasImage.toPNG())
   await mainWindow.webContents.executeJavaScript("document.querySelector('.pet-launcher')?.click()")
   await new Promise((resolve) => setTimeout(resolve, 360))
   const collapsedAgainBounds = mainWindow.getBounds()
@@ -349,7 +374,7 @@ async function runQA() {
   })()`)
   await syncTasksFromRenderer()
   const persistedTasks = readPersistedTasks()
-  fs.writeFileSync(path.join(outputRoot, 'desktop-qa.json'), JSON.stringify({ collapsedBounds, launcherState, reminderBounds, reminderState, draggedBounds, stationaryBounds, afterReleaseBounds, expandedBounds, unfinishedFlow, collapsedAgainBounds, expandedAgainBounds, collapsedByOutsideClickBounds, expandedByReminderBounds, closeButtonState, persistence: { filePath: getTasksFilePath(), taskCount: persistedTasks?.length ?? 0, jsonBacked: Array.isArray(persistedTasks) }, direction, resizeStrategy: 'single-step', outsideClickCollapse: true, reminder: { supported: Notification.isSupported(), intervalMs: REMINDER_INTERVAL_MS, visibleMs: REMINDER_VISIBLE_MS, payload: createReminderPayload(), clickOpensPanel: expandedByReminderBounds.width >= EXPANDED.width } }, null, 2))
+  fs.writeFileSync(path.join(outputRoot, 'desktop-qa.json'), JSON.stringify({ collapsedBounds, launcherState, reminderBounds, reminderState, draggedBounds, stationaryBounds, afterReleaseBounds, expandedBounds, ideaFlow, collapsedAgainBounds, expandedAgainBounds, collapsedByOutsideClickBounds, expandedByReminderBounds, closeButtonState, persistence: { filePath: getTasksFilePath(), taskCount: persistedTasks?.length ?? 0, jsonBacked: Array.isArray(persistedTasks) }, direction, resizeStrategy: 'single-step', outsideClickCollapse: true, reminder: { supported: Notification.isSupported(), intervalMs: REMINDER_INTERVAL_MS, visibleMs: REMINDER_VISIBLE_MS, payload: createReminderPayload(), clickOpensPanel: expandedByReminderBounds.width >= EXPANDED.width } }, null, 2))
   if (closeButtonState.exists) {
     await mainWindow.webContents.executeJavaScript("document.querySelector('.window-close-button')?.click()")
     return
@@ -415,6 +440,9 @@ if (!hasSingleInstanceLock) {
       openPanelFromReminder()
       return { expanded, direction }
     })
+    ipcMain.removeAllListeners('window:drag-start')
+    ipcMain.removeAllListeners('window:drag-move')
+    ipcMain.removeAllListeners('window:drag-end')
     ipcMain.on('window:drag-start', () => beginDragAt(screen.getCursorScreenPoint()))
     ipcMain.on('window:drag-move', (_event, point) => {
       if ((Number(point?.buttons) & 1) !== 1) {
@@ -425,7 +453,13 @@ if (!hasSingleInstanceLock) {
     })
     ipcMain.on('window:drag-end', clearDragState)
     ipcMain.on('tasks:load-sync', (event) => {
-      event.returnValue = readPersistedTasks()
+      event.returnValue = readPersistedTaskSnapshot()
+    })
+    ipcMain.on('tasks:bootstrap-sync', (event, localSnapshot) => {
+      event.returnValue = chooseTaskSnapshot(localSnapshot, readPersistedTaskSnapshot())
+    })
+    ipcMain.on('tasks:save-sync', (event, snapshot) => {
+      event.returnValue = writePersistedTasks(snapshot?.tasks, snapshot?.updatedAt)
     })
     ipcMain.on('app:quit', async () => {
       await syncTasksFromRenderer()

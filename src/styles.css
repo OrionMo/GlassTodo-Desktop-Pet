@@ -48,15 +48,27 @@ h1 { margin: 0; font-size: 38px; line-height: 1; letter-spacing: -.04em; font-we
 .day-switcher button { min-width: 64px; height: 32px; border: 0; border-radius: 9px; background: transparent; color: #687687; font-size: 14px; font-weight: 540; cursor: pointer; transition: color .18s ease, background .18s ease, box-shadow .18s ease; }
 .day-switcher button.is-selected { color: #17202d; background: rgba(255,255,255,.72); box-shadow: 0 1px 5px rgba(62,83,108,.14), inset 0 1px rgba(255,255,255,.82); }
 .day-switcher button:focus-visible { outline: 3px solid rgba(35,128,255,.32); outline-offset: 2px; }
+.idea-filter { display: flex; align-items: center; gap: 7px; margin: -4px 0 14px; }
+.idea-filter button { height: 29px; border: 1px solid rgba(112,132,156,.16); border-radius: 999px; padding: 0 11px; color: #6c798a; background: rgba(255,255,255,.3); font-size: 12px; font-weight: 520; cursor: pointer; transition: color .16s ease, background .16s ease, border-color .16s ease; }
+.idea-filter button:hover { color: #237df2; background: rgba(255,255,255,.62); }
+.idea-filter button.is-selected { color: #176fdf; border-color: rgba(35,125,242,.25); background: rgba(222,237,255,.76); }
+.idea-filter button:focus-visible, .idea-tags button:focus-visible, .idea-schedule-actions button:focus-visible { outline: 3px solid rgba(35,128,255,.28); outline-offset: 2px; }
 .quick-add { height: 58px; display: flex; align-items: center; margin-bottom: 18px; border: 1.5px solid rgba(35,124,255,.72); border-radius: 18px; background: rgba(248,251,255,.38); box-shadow: 0 0 0 3px rgba(36,124,255,.08), inset 0 1px rgba(255,255,255,.8); }
 .quick-add:focus-within { box-shadow: 0 0 0 4px rgba(36,124,255,.12), inset 0 1px rgba(255,255,255,.8); }
 .quick-add input { width: 100%; border: 0; outline: 0; background: transparent; padding: 0 18px; font-size: 17px; color: #1b2532; }
 .quick-add input::placeholder { color: #8793a3; }
-.unfinished-hint { height: 58px; display: flex; align-items: center; margin-bottom: 18px; padding: 0 18px; border: 1px solid rgba(255,255,255,.68); border-radius: 18px; color: #788698; background: rgba(232,239,247,.42); font-size: 15px; }
 .task-list { min-height: 214px; }
-.task-row { min-height: 76px; display: flex; align-items: center; gap: 16px; padding: 0 9px; border-top: 1px solid rgba(95,113,135,.18); font-size: 18px; font-weight: 510; transition: transform .46s cubic-bezier(.34,.08,.33,1), opacity .4s ease, filter .4s ease; }
+.todo-window.is-ideas .task-list { min-height: 150px; }
+.task-row { min-height: 76px; display: flex; align-items: center; gap: 13px; padding: 10px 9px; border-top: 1px solid rgba(95,113,135,.18); font-size: 18px; font-weight: 510; transition: transform .46s cubic-bezier(.34,.08,.33,1), opacity .4s ease, filter .4s ease; }
 .task-row.is-sinking { transform: translateY(86px) scale(.98); opacity: 0; filter: blur(4px); }
-.task-title { min-width: 0; flex: 1; }
+.task-copy { min-width: 0; flex: 1; display: grid; gap: 7px; }
+.task-title { min-width: 0; display: block; }
+.idea-tags { display: flex; gap: 6px; }
+.idea-tags button { height: 23px; border: 1px solid rgba(112,132,156,.16); border-radius: 999px; padding: 0 8px; color: #7a8797; background: rgba(255,255,255,.28); font-size: 10px; font-weight: 540; cursor: pointer; }
+.idea-tags button.is-selected { color: #176fdf; border-color: rgba(35,125,242,.24); background: rgba(220,236,255,.8); }
+.idea-schedule-actions { flex: 0 0 auto; display: grid; gap: 5px; }
+.idea-schedule-actions button { min-width: 39px; height: 25px; border: 1px solid rgba(112,132,156,.17); border-radius: 8px; padding: 0 6px; color: #627187; background: rgba(255,255,255,.4); font-size: 10px; font-weight: 540; cursor: pointer; }
+.idea-schedule-actions button:hover { color: #237df2; background: rgba(255,255,255,.72); }
 .move-task-button { flex: 0 0 auto; border: 1px solid rgba(112,132,156,.18); border-radius: 10px; padding: 6px 9px; color: #627187; background: rgba(255,255,255,.42); font-size: 12px; font-weight: 520; cursor: pointer; transition: color .16s ease, background .16s ease, transform .16s ease; }
 .move-task-button:hover { color: #237df2; background: rgba(255,255,255,.72); }
 .move-task-button:active { transform: scale(.96); }

@@ -3,6 +3,8 @@ dist/
 release/
 .qa-user-data/
 **/.qa-user-data/
+.drag-diagnostics-user-data/
+**/.drag-diagnostics-user-data/
 
 .env
 .env.*
