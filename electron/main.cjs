@@ -22,6 +22,7 @@ let resizeTimer = null
 let reminderTimer = null
 let reminderHideTimer = null
 let reminderVisible = false
+let activeReminder = null
 let taskSyncTimer = null
 let lastTaskSignature = null
 const qaMode = process.argv.includes('--qa')
@@ -73,7 +74,7 @@ function sendPanelState() {
 }
 
 function sendReminderState() {
-  mainWindow?.webContents.send('reminder:state', { visible: reminderVisible, direction })
+  mainWindow?.webContents.send('reminder:state', { visible: reminderVisible, direction, reminder: activeReminder })
 }
 
 function hideInAppReminder() {
@@ -84,15 +85,18 @@ function hideInAppReminder() {
   const area = screen.getDisplayNearestPoint({ x: current.x, y: current.y }).workArea
   const x = direction === 'left' ? current.x + current.width - COLLAPSED.width : current.x
   reminderVisible = false
+  activeReminder = null
   sendReminderState()
   mainWindow.setBounds({ x: clamp(x, area.x, area.x + area.width - COLLAPSED.width), y: current.y, ...COLLAPSED }, false)
   mainWindow.webContents.invalidate()
 }
 
-function showInAppReminder() {
+function showInAppReminder(reminderPayload = createReminderPayload()) {
   if (!mainWindow || mainWindow.isDestroyed() || expanded) return false
+  activeReminder = reminderPayload
   if (reminderVisible) {
     if (reminderHideTimer) clearTimeout(reminderHideTimer)
+    sendReminderState()
     reminderHideTimer = setTimeout(hideInAppReminder, REMINDER_VISIBLE_MS)
     return true
   }
@@ -164,27 +168,57 @@ function collapsePanel() {
   return togglePanel()
 }
 
-function openPanelFromReminder() {
+function openPanelFromReminder(reminderPayload = activeReminder) {
   if (!mainWindow || mainWindow.isDestroyed()) return
   if (reminderVisible) hideInAppReminder()
   if (!expanded) togglePanel()
   mainWindow.show()
   mainWindow.moveTop()
   mainWindow.focus()
+  if (reminderPayload) mainWindow.webContents.send('reminder:opened', reminderPayload)
 }
 
 function createReminderPayload() {
   return {
+    kind: 'overview',
     title: 'GlassTodo',
     body: '该查看一下今日待办了',
   }
 }
 
+function normalizeTaskReminderPayload(payload) {
+  const taskId = typeof payload?.taskId === 'string' ? payload.taskId.trim() : ''
+  const taskTitle = typeof payload?.taskTitle === 'string' ? payload.taskTitle.trim().slice(0, 120) : ''
+  const time = typeof payload?.time === 'string' && /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(payload.time) ? payload.time : ''
+  if (!taskId || !taskTitle || !time) return null
+  return {
+    kind: 'task',
+    taskId,
+    taskTitle,
+    time,
+    title: 'GlassTodo 任务提醒',
+    body: `${time} · ${taskTitle}`,
+  }
+}
+
 function showTodoReminder() {
-  const inAppShown = showInAppReminder()
+  const payload = createReminderPayload()
+  const inAppShown = showInAppReminder(payload)
   if (Notification.isSupported()) {
-    const reminder = new Notification(createReminderPayload())
-    reminder.once('click', openPanelFromReminder)
+    const reminder = new Notification(payload)
+    reminder.once('click', () => openPanelFromReminder(payload))
+    reminder.show()
+  }
+  return inAppShown || Notification.isSupported()
+}
+
+function showTaskReminder(payload) {
+  const reminderPayload = normalizeTaskReminderPayload(payload)
+  if (!reminderPayload) return false
+  const inAppShown = showInAppReminder(reminderPayload)
+  if (Notification.isSupported()) {
+    const reminder = new Notification({ title: reminderPayload.title, body: reminderPayload.body })
+    reminder.once('click', () => openPanelFromReminder(reminderPayload))
     reminder.show()
   }
   return inAppShown || Notification.isSupported()
@@ -437,9 +471,11 @@ if (!hasSingleInstanceLock) {
   app.whenReady().then(() => {
     ipcMain.handle('panel:toggle', togglePanel)
     ipcMain.handle('reminder:open', () => {
-      openPanelFromReminder()
+      const reminderPayload = activeReminder
+      openPanelFromReminder(reminderPayload)
       return { expanded, direction }
     })
+    ipcMain.handle('task-reminder:show', (_event, payload) => showTaskReminder(payload))
     ipcMain.removeAllListeners('window:drag-start')
     ipcMain.removeAllListeners('window:drag-move')
     ipcMain.removeAllListeners('window:drag-end')

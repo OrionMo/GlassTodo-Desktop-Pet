@@ -21,6 +21,7 @@ try {
 contextBridge.exposeInMainWorld('desktopAPI', {
   togglePanel: () => ipcRenderer.invoke('panel:toggle'),
   openReminder: () => ipcRenderer.invoke('reminder:open'),
+  showTaskReminder: (payload) => ipcRenderer.invoke('task-reminder:show', payload),
   startDrag: (point) => ipcRenderer.send('window:drag-start', point),
   moveDrag: (point) => ipcRenderer.send('window:drag-move', point),
   endDrag: () => ipcRenderer.send('window:drag-end'),
@@ -34,5 +35,10 @@ contextBridge.exposeInMainWorld('desktopAPI', {
     const handler = (_event, state) => callback(state)
     ipcRenderer.on('reminder:state', handler)
     return () => ipcRenderer.removeListener('reminder:state', handler)
+  },
+  onReminderOpened: (callback) => {
+    const handler = (_event, reminder) => callback(reminder)
+    ipcRenderer.on('reminder:opened', handler)
+    return () => ipcRenderer.removeListener('reminder:opened', handler)
   },
 })

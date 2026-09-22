@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { CaretDown, ListChecks } from '@phosphor-icons/react'
-import { IDEA_BUCKET, IDEA_FILTER_ALL, IDEA_TAG_GOAL, IDEA_TAG_INTEREST, ideaMatchesFilter, migrateTasks } from './task-model.js'
+import { CaretDown, Clock, Flag, ListChecks } from '@phosphor-icons/react'
+import { IDEA_BUCKET, IDEA_FILTER_ALL, IDEA_TAG_GOAL, IDEA_TAG_INTEREST, findDueTaskReminders, ideaMatchesFilter, markTaskReminderFired, migrateTasks, reminderOccurrenceKey, setTaskReminder, toggleTaskImportance } from './task-model.js'
 
 const seedTitles = ['整理会议资料', '回复客户邮件', '完成产品方案初稿']
+const TASK_REMINDER_CHECK_MS = 15 * 1000
 
 function dateLabel(offsetDays) {
   const now = new Date()
@@ -36,10 +37,15 @@ export function App() {
   const [sinkingId, setSinkingId] = useState(null)
   const [panelOpen, setPanelOpen] = useState(!hasDesktopBridge)
   const [panelDirection, setPanelDirection] = useState('left')
-  const [reminderVisible, setReminderVisible] = useState(false)
+  const [reminderState, setReminderState] = useState({ visible: false, reminder: null })
+  const [editingReminderId, setEditingReminderId] = useState(null)
+  const [reminderDraft, setReminderDraft] = useState('')
+  const [highlightedTaskId, setHighlightedTaskId] = useState(null)
   const dragOrigin = useRef(null)
   const suppressClick = useRef(false)
+  const highlightTimer = useRef(null)
   const isIdeas = selectedDay === 'ideas'
+  const reminderVisible = Boolean(reminderState.visible)
   const selectedDate = selectedDay === 'today' ? dateLabel(0) : selectedDay === 'tomorrow' ? dateLabel(1) : null
 
   const active = useMemo(() => tasks.filter((task) => {
@@ -59,6 +65,21 @@ export function App() {
 
   useEffect(() => {
     if (!hasDesktopBridge) return undefined
+    const checkDueReminders = () => {
+      const dueTasks = findDueTaskReminders(tasks, new Date())
+      if (dueTasks.length === 0) return
+      setTasks((current) => dueTasks.reduce((next, task) => markTaskReminderFired(next, task.id, reminderOccurrenceKey(task)), current))
+      for (const task of dueTasks) {
+        window.desktopAPI.showTaskReminder({ taskId: task.id, taskTitle: task.title, time: task.reminderTime })
+      }
+    }
+    checkDueReminders()
+    const timer = window.setInterval(checkDueReminders, TASK_REMINDER_CHECK_MS)
+    return () => window.clearInterval(timer)
+  }, [hasDesktopBridge, tasks])
+
+  useEffect(() => {
+    if (!hasDesktopBridge) return undefined
     document.body.classList.add('electron')
     document.documentElement.classList.add('electron-root')
     const unsubscribePanel = window.desktopAPI.onPanelState((state) => {
@@ -66,9 +87,10 @@ export function App() {
       setPanelDirection(state.direction)
     })
     const unsubscribeReminder = window.desktopAPI.onReminderState((state) => {
-      setReminderVisible(state.visible)
+      setReminderState(state)
       setPanelDirection(state.direction)
     })
+    const unsubscribeReminderOpened = window.desktopAPI.onReminderOpened(focusReminderTask)
     const cancelDrag = () => finishDrag(true)
     window.addEventListener('blur', cancelDrag)
     return () => {
@@ -77,6 +99,8 @@ export function App() {
       window.removeEventListener('blur', cancelDrag)
       unsubscribePanel()
       unsubscribeReminder()
+      unsubscribeReminderOpened()
+      if (highlightTimer.current) window.clearTimeout(highlightTimer.current)
     }
   }, [hasDesktopBridge])
 
@@ -122,9 +146,8 @@ export function App() {
   }
 
   async function openReminder() {
-    setSelectedDay('today')
-    setShowCompleted(false)
-    setReminderVisible(false)
+    focusReminderTask(reminderState.reminder)
+    setReminderState((current) => ({ ...current, visible: false }))
     const state = await window.desktopAPI.openReminder()
     setPanelOpen(state.expanded)
     setPanelDirection(state.direction)
@@ -133,6 +156,21 @@ export function App() {
   function selectList(day) {
     setSelectedDay(day)
     setShowCompleted(false)
+    setEditingReminderId(null)
+    setReminderDraft('')
+  }
+
+  function focusReminderTask(reminder) {
+    setSelectedDay('today')
+    setShowCompleted(false)
+    setEditingReminderId(null)
+    if (reminder?.kind !== 'task' || !reminder.taskId) return
+    setHighlightedTaskId(reminder.taskId)
+    if (highlightTimer.current) window.clearTimeout(highlightTimer.current)
+    highlightTimer.current = window.setTimeout(() => setHighlightedTaskId(null), 4200)
+    window.setTimeout(() => {
+      document.querySelector(`[data-task-id="${CSS.escape(reminder.taskId)}"]`)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+    }, 80)
   }
 
   function addTask(event) {
@@ -150,7 +188,11 @@ export function App() {
     if (sinkingId) return
     setSinkingId(id)
     window.setTimeout(() => {
-      setTasks((current) => current.map((task) => task.id === id ? { ...task, completed: true } : task))
+      setTasks((current) => current.map((task) => {
+        if (task.id !== id) return task
+        const { reminderTime, reminderFiredFor, ...rest } = task
+        return { ...rest, completed: true }
+      }))
       setSinkingId(null)
     }, 460)
   }
@@ -162,7 +204,7 @@ export function App() {
   function moveToIdeas(id) {
     setTasks((current) => current.map((task) => {
       if (task.id !== id) return task
-      const { date, ...rest } = task
+      const { date, important, reminderTime, reminderFiredFor, ...rest } = task
       return { ...rest, bucket: IDEA_BUCKET, ideaTags: [] }
     }))
   }
@@ -170,7 +212,7 @@ export function App() {
   function moveIdeaToDate(id, offsetDays) {
     setTasks((current) => current.map((task) => {
       if (task.id !== id) return task
-      const { bucket, ideaTags, ...rest } = task
+      const { bucket, ideaTags, reminderTime, reminderFiredFor, ...rest } = task
       return { ...rest, date: dateLabel(offsetDays) }
     }))
   }
@@ -181,6 +223,28 @@ export function App() {
       const tags = Array.isArray(task.ideaTags) ? task.ideaTags : []
       return { ...task, ideaTags: tags.includes(tag) ? tags.filter((item) => item !== tag) : [...tags, tag] }
     }))
+  }
+
+  function toggleImportant(id) {
+    if (selectedDay !== 'today') return
+    setTasks((current) => toggleTaskImportance(current, id))
+  }
+
+  function updateTaskReminder(id, value) {
+    if (selectedDay !== 'today') return
+    setTasks((current) => setTaskReminder(current, id, value))
+    setEditingReminderId(null)
+    setReminderDraft('')
+  }
+
+  function toggleReminderEditor(task) {
+    if (editingReminderId === task.id) {
+      setEditingReminderId(null)
+      setReminderDraft('')
+      return
+    }
+    setEditingReminderId(task.id)
+    setReminderDraft(task.reminderTime || '')
   }
 
   const ideaEmptyLabels = {
@@ -197,7 +261,7 @@ export function App() {
           <ListChecks size={32} weight="duotone" />
         </button>
       )}
-      {isDesktop && reminderVisible && <button type="button" className="reminder-toast" onClick={openReminder}><span className="reminder-dot" aria-hidden="true" /><span><strong>看看今日待办</strong><small>点击立即打开</small></span></button>}
+      {isDesktop && reminderVisible && <button type="button" className="reminder-toast" onClick={openReminder}><span className="reminder-dot" aria-hidden="true" /><span className="reminder-copy"><strong>{reminderState.reminder?.kind === 'task' ? reminderState.reminder.taskTitle : '看看今日待办'}</strong><small>{reminderState.reminder?.kind === 'task' ? `${reminderState.reminder.time} · 点击打开` : '点击立即打开'}</small></span></button>}
       <div className={`panel-wrap ${panelOpen ? 'is-visible' : ''}`}>
         <section className={`todo-window ${isIdeas ? 'is-ideas' : ''}`} aria-label="毛玻璃待办清单">
           {isDesktop && <button type="button" className="window-close-button" aria-label="关闭 GlassTodo" title="关闭 GlassTodo" onClick={() => window.desktopAPI.quit()}>×</button>}
@@ -205,7 +269,7 @@ export function App() {
             <div className="title-line"><h1>{isIdeas ? '想法' : '待办'}</h1><span className="active-count">{active.length}</span></div>
             <div className="header-meta">
               {isIdeas ? <span className="mode-label">随手记录</span> : <time dateTime={selectedDate}>{selectedDate}</time>}
-              <span className="version-label">v7.2 · Ideas</span>
+              <span className="version-label">v7.4 · Reminder</span>
             </div>
           </header>
 
@@ -230,10 +294,18 @@ export function App() {
           <div className="task-list" aria-live="polite">
             {active.length === 0 && <p className="empty">{emptyLabel}</p>}
             {active.map((task) => (
-              <div className={`task-row ${sinkingId === task.id ? 'is-sinking' : ''}`} key={task.id}>
+              <div className={`task-row ${selectedDay === 'today' && task.important ? 'is-important' : ''} ${highlightedTaskId === task.id ? 'is-reminder-highlighted' : ''} ${sinkingId === task.id ? 'is-sinking' : ''}`} data-task-id={task.id} key={task.id}>
                 <button className="check-button" type="button" aria-label={`完成任务：${task.title}`} onClick={() => completeTask(task.id)} />
                 <span className="task-copy">
                   <span className="task-title">{task.title}</span>
+                  {selectedDay === 'today' && task.reminderTime && <span className="task-reminder-label"><Clock size={13} weight="fill" />今天 {task.reminderTime}</span>}
+                  {selectedDay === 'today' && editingReminderId === task.id && (
+                    <span className="task-reminder-editor">
+                      <input type="time" aria-label={`设置提醒时间：${task.title}`} value={reminderDraft} onInput={(event) => setReminderDraft(event.currentTarget.value)} autoFocus />
+                      <button className="save-button" type="button" disabled={!reminderDraft} aria-label={`保存提醒：${task.title}`} onClick={() => updateTaskReminder(task.id, reminderDraft)}>保存</button>
+                      {task.reminderTime && <button type="button" onClick={() => updateTaskReminder(task.id, '')}>清除</button>}
+                    </span>
+                  )}
                   {isIdeas && (
                     <span className="idea-tags" aria-label="想法标签">
                       <button type="button" className={task.ideaTags?.includes(IDEA_TAG_GOAL) ? 'is-selected' : ''} aria-pressed={task.ideaTags?.includes(IDEA_TAG_GOAL) || false} onClick={() => toggleIdeaTag(task.id, IDEA_TAG_GOAL)}>目标</button>
@@ -246,7 +318,21 @@ export function App() {
                     <button type="button" onClick={() => moveIdeaToDate(task.id, 0)} title="加入今天">今天</button>
                     <button type="button" onClick={() => moveIdeaToDate(task.id, 1)} title="加入明天">明天</button>
                   </span>
-                ) : <button className="move-task-button" type="button" onClick={() => moveToIdeas(task.id)}>转为想法</button>}
+                ) : (
+                  <span className="task-row-actions">
+                    {selectedDay === 'today' && (
+                      <>
+                        <button className={`reminder-button ${task.reminderTime ? 'is-active' : ''}`} type="button" aria-label={task.reminderTime ? `修改提醒时间：${task.title}，当前${task.reminderTime}` : `设置提醒时间：${task.title}`} aria-expanded={editingReminderId === task.id} title={task.reminderTime ? `提醒时间 ${task.reminderTime}` : '设置提醒时间'} onClick={() => toggleReminderEditor(task)}>
+                          <Clock size={17} weight={task.reminderTime ? 'fill' : 'regular'} />
+                        </button>
+                        <button className={`important-button ${task.important ? 'is-active' : ''}`} type="button" aria-label={task.important ? `取消重要标记：${task.title}` : `标记为重要：${task.title}`} aria-pressed={Boolean(task.important)} title={task.important ? '取消重要标记' : '标记为重要'} onClick={() => toggleImportant(task.id)}>
+                          <Flag size={17} weight={task.important ? 'fill' : 'regular'} />
+                        </button>
+                      </>
+                    )}
+                    <button className="move-task-button" type="button" onClick={() => moveToIdeas(task.id)}>转为想法</button>
+                  </span>
+                )}
               </div>
             ))}
           </div>
@@ -256,7 +342,7 @@ export function App() {
               <span className="disclosure" aria-hidden="true"><CaretDown size={16} weight="bold" /></span><span>已完成</span><span className="completed-count">{completed.length}</span>
             </button>
             {showCompleted && <div className="completed-list">{completed.length === 0 ? <p className="completed-empty">还没有已完成任务</p> : completed.map((task) => (
-              <button type="button" className="completed-row" key={task.id} onClick={() => restoreTask(task.id)} title="点击恢复任务"><span className="done-mark" aria-hidden="true">✓</span><s>{task.title}</s></button>
+              <button type="button" className={`completed-row ${selectedDay === 'today' && task.important ? 'is-important' : ''}`} key={task.id} onClick={() => restoreTask(task.id)} title="点击恢复任务"><span className="done-mark" aria-hidden="true">✓</span><s>{task.title}</s>{selectedDay === 'today' && task.important && <Flag className="completed-important-mark" size={15} weight="fill" aria-label="重要事项" />}</button>
             ))}</div>}
           </section>
         </section>

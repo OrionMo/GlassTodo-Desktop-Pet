@@ -52,3 +52,12 @@ test('clears stale drag IPC listeners before registering the active handlers', (
     assert.ok(removal < registration)
   }
 })
+
+test('wires task reminder requests and reminder-open events through the preload bridge', () => {
+  const preload = fs.readFileSync(path.join(__dirname, '..', 'electron', 'preload.cjs'), 'utf8')
+  const main = fs.readFileSync(path.join(__dirname, '..', 'electron', 'main.cjs'), 'utf8')
+  assert.match(preload, /task-reminder:show/)
+  assert.match(preload, /reminder:opened/)
+  assert.match(main, /ipcMain\.handle\('task-reminder:show'/)
+  assert.match(main, /webContents\.send\('reminder:opened'/)
+})
