@@ -269,6 +269,16 @@ function writePersistedTasks(tasks, updatedAt = new Date().toISOString()) {
   return true
 }
 
+function backupPersistedTasks(tasks) {
+  if (!Array.isArray(tasks)) return null
+  const backupDirectory = path.join(app.getPath('userData'), 'backups')
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
+  const backupPath = path.join(backupDirectory, `tasks-before-cloud-${timestamp}.json`)
+  fs.mkdirSync(backupDirectory, { recursive: true })
+  fs.writeFileSync(backupPath, JSON.stringify({ version: 1, createdAt: new Date().toISOString(), tasks }, null, 2), 'utf8')
+  return backupPath
+}
+
 async function syncTasksFromRenderer() {
   if (!mainWindow || mainWindow.isDestroyed() || mainWindow.webContents.isLoading()) return false
   try {
@@ -497,6 +507,7 @@ if (!hasSingleInstanceLock) {
     ipcMain.on('tasks:save-sync', (event, snapshot) => {
       event.returnValue = writePersistedTasks(snapshot?.tasks, snapshot?.updatedAt)
     })
+    ipcMain.handle('tasks:backup', (_event, tasks) => backupPersistedTasks(tasks))
     ipcMain.on('app:quit', async () => {
       await syncTasksFromRenderer()
       app.quit()

@@ -35,12 +35,15 @@ GlassTodo 是一个极简的 Windows 桌面待办小工具。它平时以可拖�
 - 勾选完成后自动下沉到“已完成”区域
 - 每 30 分钟提醒查看今日待办
 - 本地 JSON 数据持久化，升级版本不会主动清空任务
+- 使用同一账号在电脑和手机之间自动同步，并保留离线编辑能力
+- 首次连接云端前自动创建本地数据备份；同步按单条任务合并，不整份覆盖
+- 手机网页支持安装到主屏幕，以独立 PWA 方式运行
 - 一键创建桌面启动快捷方式
 - 面板内提供关闭程序按钮
 
 ## 下载与使用
 
-前往仓库的 **Releases** 页面下载 `GlassTodo-v7.7.3-Windows-x64.zip`，解压后运行 `GlassTodo.exe`。
+前往仓库的 **Releases** 页面下载 Windows 版本，解压后运行 `GlassTodo.exe`。
 
 任务数据默认保存在：
 
@@ -71,6 +74,22 @@ npm run desktop
 npm run dist:win
 ```
 
+## 云同步配置
+
+1. 在 Supabase 新建项目。
+2. 在 SQL Editor 运行 [`supabase/schema.sql`](supabase/schema.sql)。
+3. 复制 `.env.example` 为 `.env.local`，填写项目 URL 和 Publishable Key。
+4. 在 Supabase Authentication 中启用邮箱密码登录。小范围测试可关闭强制邮箱确认；正式公开时应配置自有 SMTP。
+5. 重新运行 `npm run build` 或 `npm run dist:win`，云端配置会在构建时写入客户端。
+
+只能在客户端使用 Publishable Key（旧项目中也叫 anon key），绝不能把 `service_role` key 放进代码、安装包或 GitHub。
+
+同步数据表开启了 Row Level Security，每个账号只能读取和修改自己的任务。首次登录会先将当前任务备份，再把本机和云端记录合并。桌面备份位于：
+
+```text
+%APPDATA%\glasstodo\backups\tasks-before-cloud-*.json
+```
+
 ## 数据与隐私
 
-GlassTodo 的待办内容只保存在本机，不会上传到网络。公开仓库与 Release 安装包不包含作者的个人任务数据。
+未登录时，GlassTodo 的待办内容仍只保存在本机。用户主动登录云同步后，任务会传输到所配置的 Supabase 项目，并同时保留本地副本。公开仓库与 Release 安装包不包含作者的个人任务数据。

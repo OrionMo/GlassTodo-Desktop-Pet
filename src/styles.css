@@ -45,6 +45,36 @@ body { min-width: 320px; background: radial-gradient(circle at 18% 16%, rgba(255
 h1 { margin: 0; font-size: 38px; line-height: 1; letter-spacing: -.04em; font-weight: 670; }
 .active-count, time, .mode-label { color: #697687; font-size: 17px; font-weight: 450; }
 .version-label { color: rgba(105,118,135,.66); font-size: 11px; font-weight: 500; letter-spacing: .02em; }
+.cloud-status-button { height: 23px; display: inline-flex; align-items: center; gap: 4px; border: 1px solid rgba(112,132,156,.14); border-radius: 999px; padding: 0 8px; color: #718094; background: rgba(255,255,255,.32); font-size: 10px; font-weight: 560; cursor: pointer; }
+.cloud-status-button.is-synced { color: #277d61; border-color: rgba(44,143,106,.16); background: rgba(222,246,236,.55); }
+.cloud-status-button.is-syncing svg { animation: cloud-spin 1s linear infinite; }
+.cloud-status-button.is-error, .cloud-status-button.is-offline, .cloud-status-button.is-unconfigured { color: #8a7380; }
+.cloud-status-button:hover { background: rgba(255,255,255,.7); }
+.cloud-panel { display: grid; gap: 11px; margin: -7px 0 15px; padding: 13px; border: 1px solid rgba(255,255,255,.78); border-radius: 17px; background: linear-gradient(145deg, rgba(250,252,255,.65), rgba(226,236,248,.48)); box-shadow: inset 0 1px rgba(255,255,255,.9), 0 7px 18px rgba(52,73,98,.07); animation: cloud-panel-in .18s ease both; }
+.cloud-panel-heading { min-width: 0; display: flex; align-items: center; gap: 10px; }
+.cloud-panel-heading > span:last-child { min-width: 0; flex: 1; display: grid; gap: 2px; }
+.cloud-panel-heading strong { color: #344357; font-size: 12px; font-weight: 630; }
+.cloud-panel-heading small { overflow: hidden; color: #7b8899; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.cloud-mark { width: 31px; height: 31px; flex: 0 0 31px; display: grid; place-items: center; border-radius: 10px; color: #347cd3; background: rgba(219,236,255,.7); }
+.cloud-mark.is-synced { color: #278260; background: rgba(217,243,232,.76); }
+.cloud-mark.is-error, .cloud-mark.is-offline, .cloud-mark.is-unconfigured { color: #8b7180; background: rgba(237,231,237,.68); }
+.cloud-config-hint { margin: 0; color: #748194; font-size: 10px; line-height: 1.5; }
+.cloud-account-row { min-width: 0; display: flex; align-items: center; gap: 7px; }
+.cloud-account-row > span { min-width: 0; flex: 1; display: grid; gap: 1px; }
+.cloud-account-row small { color: #8793a2; font-size: 9px; }
+.cloud-account-row strong { overflow: hidden; color: #4b5a6e; font-size: 11px; font-weight: 580; text-overflow: ellipsis; white-space: nowrap; }
+.cloud-account-row button { height: 29px; display: inline-flex; align-items: center; gap: 4px; border: 1px solid rgba(50,121,215,.16); border-radius: 9px; padding: 0 9px; color: #2d73cc; background: rgba(224,239,255,.58); font-size: 9px; font-weight: 570; cursor: pointer; }
+.cloud-account-row button:disabled { opacity: .55; cursor: default; }
+.cloud-account-row .cloud-signout { width: 29px; padding: 0; justify-content: center; color: #788596; border-color: rgba(112,132,156,.14); background: rgba(255,255,255,.4); }
+.cloud-auth-form { display: grid; grid-template-columns: 1fr 1fr auto; gap: 7px; }
+.cloud-auth-form input { min-width: 0; height: 33px; border: 1px solid rgba(112,132,156,.16); border-radius: 10px; outline: 0; padding: 0 9px; color: #344257; background: rgba(255,255,255,.58); font-size: 10px; }
+.cloud-auth-form input:focus { border-color: rgba(45,117,219,.38); box-shadow: 0 0 0 3px rgba(45,117,219,.07); }
+.cloud-auth-form > button[type="submit"] { height: 33px; border: 0; border-radius: 10px; padding: 0 11px; color: white; background: #327be1; font-size: 10px; font-weight: 590; cursor: pointer; }
+.cloud-auth-form > button[type="submit"]:disabled { color: #929dab; background: rgba(222,229,237,.8); cursor: default; }
+.cloud-mode-switch { grid-column: 1 / -1; width: fit-content; border: 0; padding: 0; color: #637d9e; background: transparent; font-size: 9px; cursor: pointer; }
+.cloud-status-button:focus-visible, .cloud-panel button:focus-visible, .cloud-panel input:focus-visible { outline: 3px solid rgba(45,117,219,.25); outline-offset: 2px; }
+@keyframes cloud-spin { to { transform: rotate(360deg); } }
+@keyframes cloud-panel-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
 .day-switcher { width: 100%; display: flex; gap: 3px; margin: 0 0 16px; padding: 3px; border: 1px solid rgba(255,255,255,.68); border-radius: 12px; background: rgba(218,228,240,.45); box-shadow: inset 0 1px 2px rgba(84,105,130,.08); }
 .day-switcher button { min-width: 0; height: 32px; flex: 1; border: 0; border-radius: 9px; background: transparent; color: #687687; font-size: 13px; font-weight: 540; cursor: pointer; transition: color .18s ease, background .18s ease, box-shadow .18s ease; }
 .day-switcher button.is-selected { color: #17202d; background: rgba(255,255,255,.72); box-shadow: 0 1px 5px rgba(62,83,108,.14), inset 0 1px rgba(255,255,255,.82); }
@@ -255,5 +285,5 @@ h1 { margin: 0; font-size: 38px; line-height: 1; letter-spacing: -.04em; font-we
 .window-close-button:active { transform: scale(.94); }
 .window-close-button:focus-visible, .move-task-button:focus-visible { outline: 3px solid rgba(35,128,255,.32); outline-offset: 2px; }
 @keyframes task-reminder-highlight { 0%, 100% { box-shadow: 0 0 0 rgba(35,128,255,0); } 50% { box-shadow: 0 0 0 4px rgba(35,128,255,.16), 0 8px 20px rgba(35,128,255,.12); } }
-@media (max-width: 520px) { .stage { padding: 16px; } .todo-window { padding: 28px 20px 0; border-radius: 26px; } .todo-header { margin-inline: 6px; } h1 { font-size: 34px; } time { font-size: 15px; } .completed-shelf { margin-inline: -20px; } .task-row { font-size: 17px; } }
+@media (max-width: 520px) { body { background-attachment: fixed; } .stage { min-height: 100dvh; display: block; padding: 0; } .stage .panel-wrap, .stage .todo-window { width: 100%; min-height: 100dvh; } .todo-window { padding: 28px 20px 0; border: 0; border-radius: 0; box-shadow: none; } .todo-header { margin-inline: 6px; } h1 { font-size: 34px; } time { font-size: 15px; } .header-meta { gap: 4px; } .cloud-panel { margin-top: -5px; } .cloud-auth-form { grid-template-columns: 1fr; } .cloud-auth-form > button[type="submit"] { width: 100%; } .completed-shelf { margin-inline: -20px; } .task-row { font-size: 17px; } }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; } }

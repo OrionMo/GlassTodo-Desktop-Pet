@@ -22,6 +22,7 @@ contextBridge.exposeInMainWorld('desktopAPI', {
   togglePanel: () => ipcRenderer.invoke('panel:toggle'),
   openReminder: () => ipcRenderer.invoke('reminder:open'),
   showTaskReminder: (payload) => ipcRenderer.invoke('task-reminder:show', payload),
+  backupTasks: (tasks) => ipcRenderer.invoke('tasks:backup', tasks),
   startDrag: (point) => ipcRenderer.send('window:drag-start', point),
   moveDrag: (point) => ipcRenderer.send('window:drag-move', point),
   endDrag: () => ipcRenderer.send('window:drag-end'),

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowRight, CalendarBlank, CaretDown, CheckCircle, Clock, Coffee, Flag, ListChecks, PencilSimple, Play, Target, Trash, WarningCircle } from '@phosphor-icons/react'
+import { ArrowClockwise, ArrowRight, CalendarBlank, CaretDown, CheckCircle, Cloud, CloudCheck, CloudSlash, Clock, Coffee, Flag, ListChecks, PencilSimple, Play, SignOut, Target, Trash, WarningCircle } from '@phosphor-icons/react'
 import { DEADLINE_BUCKET, HABIT_BUCKET, HABIT_STATE_ACTIVE, HABIT_STATE_CANDIDATE, HABIT_STATE_FINISHED, IDEA_BUCKET, IDEA_FILTER_ALL, IDEA_TAG_GOAL, IDEA_TAG_INTEREST, REVIEW_BUCKET, REVIEW_CATEGORY_ATTENTION, REVIEW_CATEGORY_COMMUNICATION, REVIEW_CATEGORY_INFORMATION, REVIEW_CATEGORY_OTHER, REVIEW_CATEGORY_PREPARATION, REVIEW_CATEGORY_PROCESS, REVIEW_CATEGORY_TIME, REVIEW_FILTER_ALL, REVIEW_STATUS_IMPROVED, REVIEW_STATUS_PENDING, REVIEW_STATUS_VERIFY, addReviewActionToHabits, addReviewActionToToday, compareDeadlineTasks, deadlineStatus, findDueTaskReminders, finishHabitCycle, habitProgress, ideaMatchesFilter, incrementReviewOccurrence, markTaskReminderFired, migrateTasks, moveDeadlineToToday, moveHabitToToday, normalizeDeadlineDate, normalizeHabitDuration, normalizeHabitWeeklyTarget, normalizeReminderTime, normalizeReviewCategory, normalizeReviewStatus, recordHabitCheckIn, recordHabitRest, reminderOccurrenceKey, reviewMatchesFilter, setTaskReminder, startHabitCycle, toggleTaskImportance } from './task-model.js'
+import { useCloudSync } from './use-cloud-sync.js'
 
 const seedTitles = ['整理会议资料', '回复客户邮件', '完成产品方案初稿']
 const TASK_REMINDER_CHECK_MS = 15 * 1000
@@ -69,6 +70,11 @@ export function App() {
   const [editingReminderId, setEditingReminderId] = useState(null)
   const [reminderDraft, setReminderDraft] = useState('')
   const [highlightedTaskId, setHighlightedTaskId] = useState(null)
+  const [syncPanelOpen, setSyncPanelOpen] = useState(false)
+  const [authMode, setAuthMode] = useState('signin')
+  const [authEmail, setAuthEmail] = useState('')
+  const [authPassword, setAuthPassword] = useState('')
+  const cloud = useCloudSync(tasks, setTasks)
   const dragOrigin = useRef(null)
   const suppressClick = useRef(false)
   const highlightTimer = useRef(null)
@@ -458,6 +464,22 @@ export function App() {
     setReminderDraft(task.reminderTime || '')
   }
 
+  async function submitAuth(event) {
+    event.preventDefault()
+    const email = authEmail.trim()
+    if (!email || authPassword.length < 6) return
+    const result = authMode === 'signup'
+      ? await cloud.signUp(email, authPassword)
+      : await cloud.signIn(email, authPassword)
+    if (!result?.error) setAuthPassword('')
+  }
+
+  function cloudIcon() {
+    if (!cloud.configured || cloud.status === 'offline' || cloud.status === 'error') return <CloudSlash size={14} />
+    if (cloud.session && cloud.status === 'synced') return <CloudCheck size={14} weight="fill" />
+    return <Cloud size={14} />
+  }
+
   const ideaEmptyLabels = {
     [IDEA_FILTER_ALL]: '还没有记录想法',
     [IDEA_TAG_GOAL]: '还没有符合当下目标的想法',
@@ -483,9 +505,35 @@ export function App() {
             <div className="title-line"><h1>{isIdeas ? '想法' : isDeadlines ? 'DDL' : isHabits ? '习惯' : isReviews ? '复盘' : '待办'}</h1><span className="active-count">{isHabits ? (activeHabit ? 1 : 0) : isReviews ? reviewCount : active.length}</span></div>
             <div className="header-meta">
               {isIdeas ? <span className="mode-label">随手记录</span> : isDeadlines ? <span className="mode-label">按截止日期排序</span> : isHabits ? <span className="mode-label">一次专注一个</span> : isReviews ? <span className="mode-label">问题变成行动</span> : <time dateTime={selectedDate}>{selectedDate}</time>}
-              <span className="version-label">v7.7.3 · Review</span>
+              <span className="version-label">v7.8.0 · Sync</span>
+              <button type="button" className={`cloud-status-button is-${cloud.status}`} aria-expanded={syncPanelOpen} onClick={() => setSyncPanelOpen((value) => !value)}>{cloudIcon()}<span>{cloud.session ? '已连接' : '云同步'}</span></button>
             </div>
           </header>
+
+          {syncPanelOpen && (
+            <section className="cloud-panel" aria-label="云同步设置">
+              <div className="cloud-panel-heading">
+                <span className={`cloud-mark is-${cloud.status}`}>{cloudIcon()}</span>
+                <span><strong>{cloud.session ? '同账号自动同步' : '连接云同步'}</strong><small>{cloud.message}</small></span>
+              </div>
+              {!cloud.configured ? (
+                <p className="cloud-config-hint">当前安装包还没有连接云端项目。配置后，本机数据会先备份，再与云端逐条合并。</p>
+              ) : cloud.session ? (
+                <div className="cloud-account-row">
+                  <span><small>当前账号</small><strong>{cloud.session.user.email}</strong></span>
+                  <button type="button" disabled={cloud.status === 'syncing'} onClick={() => cloud.syncNow()}><ArrowClockwise size={14} />立即同步</button>
+                  <button type="button" className="cloud-signout" aria-label="退出云同步账号" title="退出账号" onClick={cloud.signOut}><SignOut size={14} /></button>
+                </div>
+              ) : (
+                <form className="cloud-auth-form" onSubmit={submitAuth}>
+                  <input type="email" autoComplete="email" aria-label="邮箱" placeholder="邮箱" value={authEmail} onChange={(event) => setAuthEmail(event.target.value)} />
+                  <input type="password" minLength="6" autoComplete={authMode === 'signup' ? 'new-password' : 'current-password'} aria-label="密码" placeholder="密码（至少 6 位）" value={authPassword} onChange={(event) => setAuthPassword(event.target.value)} />
+                  <button type="submit" disabled={!authEmail.trim() || authPassword.length < 6 || cloud.status === 'syncing'}>{authMode === 'signup' ? '创建账号' : '登录'}</button>
+                  <button type="button" className="cloud-mode-switch" onClick={() => setAuthMode((mode) => mode === 'signup' ? 'signin' : 'signup')}>{authMode === 'signup' ? '已有账号，去登录' : '第一次使用，创建账号'}</button>
+                </form>
+              )}
+            </section>
+          )}
 
           <nav className="day-switcher" aria-label="待办列表">
             <button type="button" className={selectedDay === 'today' ? 'is-selected' : ''} aria-pressed={selectedDay === 'today'} onClick={() => selectList('today')}>今天</button>

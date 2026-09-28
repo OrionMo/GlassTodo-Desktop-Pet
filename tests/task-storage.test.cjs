@@ -62,6 +62,14 @@ test('wires task reminder requests and reminder-open events through the preload 
   assert.match(main, /webContents\.send\('reminder:opened'/)
 })
 
+test('creates a dedicated disk backup before first cloud migration', () => {
+  const preload = fs.readFileSync(path.join(__dirname, '..', 'electron', 'preload.cjs'), 'utf8')
+  const main = fs.readFileSync(path.join(__dirname, '..', 'electron', 'main.cjs'), 'utf8')
+  assert.match(preload, /tasks:backup/)
+  assert.match(main, /tasks-before-cloud-/)
+  assert.match(main, /ipcMain\.handle\('tasks:backup'/)
+})
+
 test('uses in-app confirmation controls instead of blocking native dialogs', () => {
   const app = fs.readFileSync(path.join(__dirname, '..', 'src', 'App.jsx'), 'utf8')
   assert.doesNotMatch(app, /window\.confirm/)

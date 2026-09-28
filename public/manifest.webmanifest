@@ -1,0 +1,19 @@
+{
+  "name": "GlassTodo 桌宠待办",
+  "short_name": "GlassTodo",
+  "description": "简约毛玻璃风格的跨设备待办工具",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#e8f0f8",
+  "theme_color": "#e8f0f8",
+  "lang": "zh-CN",
+  "icons": [
+    {
+      "src": "./icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
