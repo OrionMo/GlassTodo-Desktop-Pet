@@ -61,3 +61,10 @@ test('wires task reminder requests and reminder-open events through the preload 
   assert.match(main, /ipcMain\.handle\('task-reminder:show'/)
   assert.match(main, /webContents\.send\('reminder:opened'/)
 })
+
+test('uses in-app confirmation controls instead of blocking native dialogs', () => {
+  const app = fs.readFileSync(path.join(__dirname, '..', 'src', 'App.jsx'), 'utf8')
+  assert.doesNotMatch(app, /window\.confirm/)
+  assert.match(app, /review-delete-confirm/)
+  assert.match(app, /habit-end-confirm/)
+})
