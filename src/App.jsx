@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowClockwise, ArrowRight, CalendarBlank, CaretDown, CheckCircle, Cloud, CloudCheck, CloudSlash, Clock, Coffee, Flag, ListChecks, PencilSimple, Play, SignOut, Target, Trash, WarningCircle } from '@phosphor-icons/react'
-import { DEADLINE_BUCKET, HABIT_BUCKET, HABIT_STATE_ACTIVE, HABIT_STATE_CANDIDATE, HABIT_STATE_FINISHED, IDEA_BUCKET, IDEA_FILTER_ALL, IDEA_TAG_GOAL, IDEA_TAG_INTEREST, REVIEW_BUCKET, REVIEW_CATEGORY_ATTENTION, REVIEW_CATEGORY_COMMUNICATION, REVIEW_CATEGORY_INFORMATION, REVIEW_CATEGORY_OTHER, REVIEW_CATEGORY_PREPARATION, REVIEW_CATEGORY_PROCESS, REVIEW_CATEGORY_TIME, REVIEW_FILTER_ALL, REVIEW_STATUS_IMPROVED, REVIEW_STATUS_PENDING, REVIEW_STATUS_VERIFY, addReviewActionToHabits, addReviewActionToToday, compareDeadlineTasks, deadlineStatus, findDueTaskReminders, finishHabitCycle, habitProgress, ideaMatchesFilter, incrementReviewOccurrence, markTaskReminderFired, migrateTasks, moveDeadlineToToday, moveHabitToToday, normalizeDeadlineDate, normalizeHabitDuration, normalizeHabitWeeklyTarget, normalizeReminderTime, normalizeReviewCategory, normalizeReviewStatus, recordHabitCheckIn, recordHabitRest, reminderOccurrenceKey, reviewMatchesFilter, setTaskReminder, startHabitCycle, toggleTaskImportance } from './task-model.js'
+import { DEADLINE_BUCKET, HABIT_BUCKET, HABIT_STATE_ACTIVE, HABIT_STATE_CANDIDATE, HABIT_STATE_FINISHED, IDEA_BUCKET, IDEA_FILTER_ALL, IDEA_TAG_GOAL, IDEA_TAG_INTEREST, REVIEW_BUCKET, REVIEW_CATEGORY_ATTENTION, REVIEW_CATEGORY_COMMUNICATION, REVIEW_CATEGORY_INFORMATION, REVIEW_CATEGORY_OTHER, REVIEW_CATEGORY_PREPARATION, REVIEW_CATEGORY_PROCESS, REVIEW_CATEGORY_TIME, REVIEW_FILTER_ALL, REVIEW_STATUS_IMPROVED, REVIEW_STATUS_PENDING, REVIEW_STATUS_VERIFY, addReviewActionToHabits, addReviewActionToToday, carryOverUnfinishedTasks, carryoverLabel, compareDeadlineTasks, deadlineStatus, findDueTaskReminders, finishHabitCycle, habitProgress, ideaMatchesFilter, incrementReviewOccurrence, markTaskReminderFired, migrateTasks, moveDeadlineToToday, moveHabitToToday, normalizeDeadlineDate, normalizeHabitDuration, normalizeHabitWeeklyTarget, normalizeReminderTime, normalizeReviewCategory, normalizeReviewStatus, recordHabitCheckIn, recordHabitRest, reminderOccurrenceKey, reviewMatchesFilter, setTaskReminder, startHabitCycle, toggleTaskImportance } from './task-model.js'
 import { useCloudSync } from './use-cloud-sync.js'
 
 const seedTitles = ['整理会议资料', '回复客户邮件', '完成产品方案初稿']
 const TASK_REMINDER_CHECK_MS = 15 * 1000
+const DATE_CHANGE_CHECK_MS = 60 * 1000
 const REVIEW_CATEGORIES = [
   [REVIEW_CATEGORY_PREPARATION, '准备不足'],
   [REVIEW_CATEGORY_TIME, '时间安排'],
@@ -61,6 +62,7 @@ export function App() {
   const [reviewEditor, setReviewEditor] = useState({ title: '', scene: '', category: REVIEW_CATEGORY_OTHER, cause: '', action: '', status: REVIEW_STATUS_PENDING })
   const [confirmAction, setConfirmAction] = useState(null)
   const [selectedDay, setSelectedDay] = useState('today')
+  const [todayDate, setTodayDate] = useState(() => dateLabel(0))
   const [ideaFilter, setIdeaFilter] = useState(IDEA_FILTER_ALL)
   const [showCompleted, setShowCompleted] = useState(false)
   const [sinkingId, setSinkingId] = useState(null)
@@ -83,7 +85,7 @@ export function App() {
   const isHabits = selectedDay === 'habits'
   const isReviews = selectedDay === 'reviews'
   const reminderVisible = Boolean(reminderState.visible)
-  const selectedDate = selectedDay === 'today' ? dateLabel(0) : selectedDay === 'tomorrow' ? dateLabel(1) : null
+  const selectedDate = selectedDay === 'today' ? todayDate : selectedDay === 'tomorrow' ? dateLabel(1) : null
   const habitTasks = useMemo(() => tasks.filter((task) => task?.bucket === HABIT_BUCKET), [tasks])
   const activeHabit = useMemo(() => habitTasks.find((task) => task.habitState === HABIT_STATE_ACTIVE) || null, [habitTasks])
   const candidateHabits = useMemo(() => habitTasks.filter((task) => task.habitState !== HABIT_STATE_ACTIVE && task.habitState !== HABIT_STATE_FINISHED), [habitTasks])
@@ -112,6 +114,16 @@ export function App() {
     localStorage.setItem('glass-todo.tasks.v2', JSON.stringify(tasks))
     localStorage.setItem('glass-todo.tasks.v2.updatedAt', new Date().toISOString())
   }, [tasks])
+
+  useEffect(() => {
+    const refreshToday = () => setTodayDate(dateLabel(0))
+    const timer = window.setInterval(refreshToday, DATE_CHANGE_CHECK_MS)
+    return () => window.clearInterval(timer)
+  }, [])
+
+  useEffect(() => {
+    setTasks((current) => carryOverUnfinishedTasks(current, todayDate))
+  }, [tasks, todayDate])
 
   useEffect(() => {
     if (!hasDesktopBridge) return undefined
@@ -505,7 +517,7 @@ export function App() {
             <div className="title-line"><h1>{isIdeas ? '想法' : isDeadlines ? 'DDL' : isHabits ? '习惯' : isReviews ? '复盘' : '待办'}</h1><span className="active-count">{isHabits ? (activeHabit ? 1 : 0) : isReviews ? reviewCount : active.length}</span></div>
             <div className="header-meta">
               {isIdeas ? <span className="mode-label">随手记录</span> : isDeadlines ? <span className="mode-label">按截止日期排序</span> : isHabits ? <span className="mode-label">一次专注一个</span> : isReviews ? <span className="mode-label">问题变成行动</span> : <time dateTime={selectedDate}>{selectedDate}</time>}
-              <span className="version-label">v7.8.0 · Sync</span>
+              <span className="version-label">v7.9.0 · Sync</span>
               <button type="button" className={`cloud-status-button is-${cloud.status}`} aria-expanded={syncPanelOpen} onClick={() => setSyncPanelOpen((value) => !value)}>{cloudIcon()}<span>{cloud.session ? '已连接' : '云同步'}</span></button>
             </div>
           </header>
@@ -686,10 +698,11 @@ export function App() {
           <div className="task-list" aria-live="polite">
             {active.length === 0 && <p className="empty">{emptyLabel}</p>}
             {active.map((task) => (
-              <div className={`task-row ${selectedDay === 'today' && task.important ? 'is-important' : ''} ${highlightedTaskId === task.id ? 'is-reminder-highlighted' : ''} ${sinkingId === task.id ? 'is-sinking' : ''}`} data-task-id={task.id} key={task.id}>
+              <div className={`task-row ${selectedDay === 'today' && task.important ? 'is-important' : ''} ${selectedDay === 'today' && task.carryoverCount ? 'is-carried-over' : ''} ${highlightedTaskId === task.id ? 'is-reminder-highlighted' : ''} ${sinkingId === task.id ? 'is-sinking' : ''}`} data-task-id={task.id} key={task.id}>
                 <button className="check-button" type="button" aria-label={`完成任务：${task.title}`} onClick={() => completeTask(task.id)} />
                 <span className="task-copy">
                   <span className="task-title">{task.title}</span>
+                  {selectedDay === 'today' && task.carryoverCount && <span className="task-carryover-label"><ArrowRight size={13} weight="bold" />{carryoverLabel(task)}</span>}
                   {isDeadlines && (() => { const status = deadlineStatus(task); return <span className="deadline-meta"><span className="deadline-date"><CalendarBlank size={13} weight="fill" />{task.deadlineDate}{task.deadlineTime ? ` · ${task.deadlineTime}` : ''}</span><span className={`deadline-status is-${status.key}`}>{status.label}</span></span> })()}
                   {selectedDay === 'today' && task.bucket === HABIT_BUCKET && <span className="task-habit-label"><Target size={13} weight="fill" />习惯 · {task.habitMinimum}</span>}
                   {selectedDay === 'today' && task.reminderTime && <span className="task-reminder-label"><Clock size={13} weight="fill" />今天 {task.reminderTime}</span>}

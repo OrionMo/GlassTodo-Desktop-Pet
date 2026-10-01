@@ -103,10 +103,13 @@ h1 { margin: 0; font-size: 38px; line-height: 1; letter-spacing: -.04em; font-we
 .task-row { min-height: 76px; position: relative; display: flex; align-items: center; gap: 13px; padding: 10px 9px; border-top: 1px solid rgba(95,113,135,.18); border-radius: 15px; font-size: 18px; font-weight: 510; transition: transform .46s cubic-bezier(.34,.08,.33,1), opacity .4s ease, filter .4s ease, background .18s ease, box-shadow .18s ease; }
 .task-row.is-important { border-top-color: transparent; background: linear-gradient(90deg, rgba(255,177,53,.15), rgba(255,248,230,.08) 72%, transparent); box-shadow: inset 3px 0 rgba(255,159,10,.82); }
 .task-row.is-important .task-title { font-weight: 630; }
+.task-row.is-carried-over { border-top-color: transparent; background: linear-gradient(90deg, rgba(111,118,255,.15), rgba(239,241,255,.1) 74%, transparent); box-shadow: inset 3px 0 rgba(92,98,224,.76); }
+.task-row.is-carried-over .task-title { color: #27304f; }
 .task-row.is-reminder-highlighted { animation: task-reminder-highlight 1.05s ease-in-out 3; }
 .task-row.is-sinking { transform: translateY(86px) scale(.98); opacity: 0; filter: blur(4px); }
 .task-copy { min-width: 0; flex: 1; display: grid; gap: 7px; }
 .task-title { min-width: 0; display: block; }
+.task-carryover-label { width: fit-content; display: inline-flex; align-items: center; gap: 4px; padding: 3px 7px; border: 1px solid rgba(92,98,224,.2); border-radius: 999px; color: #5962c9; background: rgba(230,232,255,.72); font-size: 10px; font-weight: 590; line-height: 1; }
 .task-reminder-label { width: fit-content; display: inline-flex; align-items: center; gap: 4px; padding: 3px 7px; border: 1px solid rgba(35,125,242,.18); border-radius: 999px; color: #2378d8; background: rgba(220,237,255,.56); font-size: 10px; font-weight: 580; line-height: 1; }
 .task-habit-label { width: fit-content; display: inline-flex; align-items: center; gap: 4px; padding: 3px 7px; border: 1px solid rgba(92,106,224,.18); border-radius: 999px; color: #5965ca; background: rgba(230,231,255,.6); font-size: 10px; font-weight: 580; line-height: 1; }
 .task-reminder-editor { display: flex; align-items: center; gap: 6px; }

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { DEADLINE_BUCKET, HABIT_BUCKET, HABIT_STATE_ACTIVE, HABIT_STATE_CANDIDATE, HABIT_STATE_FINISHED, IDEA_FILTER_ALL, IDEA_TAG_GOAL, IDEA_TAG_INTEREST, REVIEW_BUCKET, REVIEW_CATEGORY_OTHER, REVIEW_CATEGORY_PROCESS, REVIEW_FILTER_ALL, REVIEW_STATUS_IMPROVED, REVIEW_STATUS_PENDING, REVIEW_STATUS_VERIFY, addReviewActionToHabits, addReviewActionToToday, compareDeadlineTasks, deadlineStatus, findDueTaskReminders, finishHabitCycle, habitProgress, ideaMatchesFilter, incrementReviewOccurrence, markTaskReminderFired, migrateTasks, moveDeadlineToToday, moveHabitToToday, normalizeDeadlineDate, normalizeHabitDuration, normalizeHabitWeeklyTarget, normalizeReminderTime, normalizeReviewCategory, normalizeReviewStatus, recordHabitCheckIn, recordHabitRest, reminderOccurrenceKey, reviewMatchesFilter, setTaskReminder, startHabitCycle, toggleTaskImportance } from '../src/task-model.js'
+import { DEADLINE_BUCKET, HABIT_BUCKET, HABIT_STATE_ACTIVE, HABIT_STATE_CANDIDATE, HABIT_STATE_FINISHED, IDEA_BUCKET, IDEA_FILTER_ALL, IDEA_TAG_GOAL, IDEA_TAG_INTEREST, REVIEW_BUCKET, REVIEW_CATEGORY_OTHER, REVIEW_CATEGORY_PROCESS, REVIEW_FILTER_ALL, REVIEW_STATUS_IMPROVED, REVIEW_STATUS_PENDING, REVIEW_STATUS_VERIFY, addReviewActionToHabits, addReviewActionToToday, carryOverUnfinishedTasks, carryoverLabel, compareDeadlineTasks, deadlineStatus, findDueTaskReminders, finishHabitCycle, habitProgress, ideaMatchesFilter, incrementReviewOccurrence, markTaskReminderFired, migrateTasks, moveDeadlineToToday, moveHabitToToday, normalizeDeadlineDate, normalizeHabitDuration, normalizeHabitWeeklyTarget, normalizeReminderTime, normalizeReviewCategory, normalizeReviewStatus, recordHabitCheckIn, recordHabitRest, reminderOccurrenceKey, reviewMatchesFilter, setTaskReminder, startHabitCycle, toggleTaskImportance } from '../src/task-model.js'
 
 test('migrates legacy unfinished records into untagged ideas without changing identity or status', () => {
   const source = [{ id: 'legacy-1', title: '旧未完成事项', completed: true, date: '2026-09-17', bucket: 'unfinished' }]
@@ -44,6 +44,37 @@ test('toggles importance without changing other tasks', () => {
   assert.equal(marked[0].important, true)
   assert.equal(marked[1], source[1])
   assert.equal(toggleTaskImportance(marked, 'today-1')[0].important, false)
+})
+
+test('carries only unfinished ordinary tasks into today without duplicating them', () => {
+  const source = [
+    { id: 'ordinary', title: '昨日任务', completed: false, date: '2026-09-30' },
+    { id: 'done', title: '已经完成', completed: true, date: '2026-09-30' },
+    { id: 'tomorrow', title: '明日任务', completed: false, date: '2026-10-02' },
+    { id: 'idea', title: '想法', completed: false, date: '2026-09-30', bucket: IDEA_BUCKET },
+    { id: 'deadline', title: 'DDL', completed: false, date: '2026-09-30', bucket: DEADLINE_BUCKET },
+    { id: 'habit', title: '习惯', completed: false, date: '2026-09-30', bucket: HABIT_BUCKET },
+    { id: 'review', title: '复盘', completed: false, date: '2026-09-30', bucket: REVIEW_BUCKET },
+  ]
+  const carried = carryOverUnfinishedTasks(source, '2026-10-01')
+
+  assert.equal(carried.length, source.length)
+  assert.deepEqual(carried[0], { ...source[0], date: '2026-10-01', carriedFromDate: '2026-09-30', carryoverCount: 1, carriedOverAt: '2026-10-01' })
+  assert.deepEqual(carried.slice(1), source.slice(1))
+  assert.equal(carryoverLabel(carried[0]), '昨日未完成')
+})
+
+test('counts missed calendar days and remains idempotent on the same day', () => {
+  const source = [{ id: 'ordinary', title: '持续任务', completed: false, date: '2026-09-28' }]
+  const carried = carryOverUnfinishedTasks(source, '2026-10-01')
+  const sameDay = carryOverUnfinishedTasks(carried, '2026-10-01')
+  const nextDay = carryOverUnfinishedTasks(carried, '2026-10-02')
+
+  assert.equal(carried[0].carryoverCount, 3)
+  assert.equal(carryoverLabel(carried[0]), '延续 3 天')
+  assert.equal(sameDay, carried)
+  assert.equal(nextDay[0].carryoverCount, 4)
+  assert.equal(nextDay[0].carriedFromDate, '2026-09-28')
 })
 
 test('normalizes reminder time and rejects invalid values', () => {

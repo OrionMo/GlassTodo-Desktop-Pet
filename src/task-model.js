@@ -111,6 +111,40 @@ export function toggleTaskImportance(tasks, id) {
   return tasks.map((task) => task?.id === id ? { ...task, important: !task.important } : task)
 }
 
+function calendarDayDistance(fromDate, toDate) {
+  const [fromYear, fromMonth, fromDay] = fromDate.split('-').map(Number)
+  const [toYear, toMonth, toDay] = toDate.split('-').map(Number)
+  return Math.round((Date.UTC(toYear, toMonth - 1, toDay) - Date.UTC(fromYear, fromMonth - 1, fromDay)) / 86400000)
+}
+
+export function carryOverUnfinishedTasks(tasks, todayDate) {
+  if (!Array.isArray(tasks) || !normalizeDeadlineDate(todayDate)) return Array.isArray(tasks) ? tasks : []
+
+  let changed = false
+  const next = tasks.map((task) => {
+    const taskDate = normalizeDeadlineDate(task?.date)
+    if (!task || task.completed || task.bucket || !taskDate || taskDate >= todayDate) return task
+
+    const elapsedDays = calendarDayDistance(taskDate, todayDate)
+    if (elapsedDays < 1) return task
+    changed = true
+    return {
+      ...task,
+      date: todayDate,
+      carriedFromDate: normalizeDeadlineDate(task.carriedFromDate) || taskDate,
+      carryoverCount: Math.max(0, Number(task.carryoverCount) || 0) + elapsedDays,
+      carriedOverAt: todayDate,
+    }
+  })
+
+  return changed ? next : tasks
+}
+
+export function carryoverLabel(task) {
+  const days = Math.max(1, Math.floor(Number(task?.carryoverCount) || 1))
+  return days === 1 ? '昨日未完成' : `延续 ${days} 天`
+}
+
 export function normalizeDeadlineDate(value) {
   const normalized = typeof value === 'string' ? value.trim() : ''
   if (!deadlineDatePattern.test(normalized)) return null
