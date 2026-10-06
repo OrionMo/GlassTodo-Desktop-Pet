@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { DEADLINE_BUCKET, HABIT_BUCKET, HABIT_STATE_ACTIVE, HABIT_STATE_CANDIDATE, HABIT_STATE_FINISHED, IDEA_BUCKET, IDEA_FILTER_ALL, IDEA_TAG_GOAL, IDEA_TAG_INTEREST, REVIEW_BUCKET, REVIEW_CATEGORY_OTHER, REVIEW_CATEGORY_PROCESS, REVIEW_FILTER_ALL, REVIEW_STATUS_IMPROVED, REVIEW_STATUS_PENDING, REVIEW_STATUS_VERIFY, addReviewActionToHabits, addReviewActionToToday, carryOverUnfinishedTasks, carryoverLabel, compareDeadlineTasks, deadlineStatus, findDueTaskReminders, finishHabitCycle, habitProgress, ideaMatchesFilter, incrementReviewOccurrence, markTaskReminderFired, migrateTasks, moveDeadlineToToday, moveHabitToToday, normalizeDeadlineDate, normalizeHabitDuration, normalizeHabitWeeklyTarget, normalizeReminderTime, normalizeReviewCategory, normalizeReviewStatus, recordHabitCheckIn, recordHabitRest, reminderOccurrenceKey, reviewMatchesFilter, setTaskReminder, startHabitCycle, toggleTaskImportance } from '../src/task-model.js'
+import { DEADLINE_BUCKET, HABIT_BUCKET, HABIT_MINIMUM_UNIT_CUSTOM, HABIT_MINIMUM_UNIT_HOURS, HABIT_MINIMUM_UNIT_MINUTES, HABIT_STATE_ACTIVE, HABIT_STATE_CANDIDATE, HABIT_STATE_FINISHED, IDEA_BUCKET, IDEA_FILTER_ALL, IDEA_TAG_GOAL, IDEA_TAG_INTEREST, NOTE_BUCKET, REVIEW_BUCKET, REVIEW_CATEGORY_OTHER, REVIEW_CATEGORY_PROCESS, REVIEW_FILTER_ALL, REVIEW_STATUS_IMPROVED, REVIEW_STATUS_PENDING, REVIEW_STATUS_VERIFY, addNoteToIdeas, addNoteToToday, addReviewActionToHabits, addReviewActionToToday, carryOverUnfinishedTasks, carryoverLabel, compareDeadlineTasks, compareNotes, compareTaskImportance, deadlineStatus, findDueTaskReminders, finishHabitCycle, formatHabitMinimum, habitMinimumLabel, habitProgress, ideaMatchesFilter, incrementReviewOccurrence, markTaskReminderFired, migrateTasks, moveDeadlineToToday, moveHabitToToday, normalizeDeadlineDate, normalizeHabitDuration, normalizeHabitWeeklyTarget, normalizeReminderTime, normalizeReviewCategory, normalizeReviewStatus, noteDisplayTitle, noteMatchesQuery, parseHabitMinimum, recordHabitCheckIn, recordHabitRest, reminderOccurrenceKey, reviewMatchesFilter, setTaskReminder, startHabitCycle, toggleNotePinned, toggleTaskImportance, upsertNote } from '../src/task-model.js'
 
 test('migrates legacy unfinished records into untagged ideas without changing identity or status', () => {
   const source = [{ id: 'legacy-1', title: '旧未完成事项', completed: true, date: '2026-09-17', bucket: 'unfinished' }]
@@ -35,6 +35,40 @@ test('an idea can belong to both filters', () => {
   assert.equal(ideaMatchesFilter(idea, IDEA_TAG_INTEREST), true)
 })
 
+test('uses a note title or first content line and searches title plus body', () => {
+  const titled = { id: 'note-1', bucket: NOTE_BUCKET, title: '课程灵感', noteContent: '正文里有关键字' }
+  const untitled = { id: 'note-2', bucket: NOTE_BUCKET, title: '  ', noteContent: '\n第一行摘要\n第二行' }
+  assert.equal(noteDisplayTitle(titled), '课程灵感')
+  assert.equal(noteDisplayTitle(untitled), '第一行摘要')
+  assert.equal(noteMatchesQuery(titled, '课程'), true)
+  assert.equal(noteMatchesQuery(titled, '关键字'), true)
+  assert.equal(noteMatchesQuery(titled, '不存在'), false)
+})
+
+test('upserts valid notes and sorts pinned notes before newest regular notes', () => {
+  const older = { id: 'older', bucket: NOTE_BUCKET, noteContent: '旧笔记', noteUpdatedAt: '2026-10-01T08:00:00.000Z' }
+  const newer = { id: 'newer', bucket: NOTE_BUCKET, noteContent: '新笔记', noteUpdatedAt: '2026-10-02T08:00:00.000Z' }
+  assert.equal(upsertNote([], { id: 'blank', bucket: NOTE_BUCKET, noteContent: '   ' }).length, 0)
+  const created = upsertNote([older], newer)
+  assert.deepEqual(created.map((note) => note.id), ['newer', 'older'])
+  const updated = upsertNote(created, { ...older, noteContent: '更新后的旧笔记', noteUpdatedAt: '2026-10-03T08:00:00.000Z' })
+  assert.equal(updated.find((note) => note.id === 'older').noteContent, '更新后的旧笔记')
+  const pinned = toggleNotePinned(updated, 'newer', '2026-10-04T08:00:00.000Z')
+  assert.deepEqual([...pinned].sort(compareNotes).map((note) => note.id), ['newer', 'older'])
+})
+
+test('creates one linked idea and one today task from a note without removing the note', () => {
+  const note = { id: 'note-1', bucket: NOTE_BUCKET, title: '', noteContent: '整理课程里的零散灵感', noteCreatedAt: '2026-10-06T08:00:00.000Z' }
+  const withIdea = addNoteToIdeas([note], note.id, 'idea-1')
+  assert.equal(withIdea.length, 2)
+  assert.deepEqual(withIdea[0], { id: 'idea-1', title: '整理课程里的零散灵感', completed: false, bucket: IDEA_BUCKET, ideaTags: [], sourceNoteId: note.id })
+  assert.equal(addNoteToIdeas(withIdea, note.id, 'idea-2'), withIdea)
+  const withToday = addNoteToToday(withIdea, note.id, '2026-10-06', 'today-1')
+  assert.deepEqual(withToday[0], { id: 'today-1', title: '整理课程里的零散灵感', completed: false, date: '2026-10-06', sourceNoteId: note.id })
+  assert.equal(addNoteToToday(withToday, note.id, '2026-10-06', 'today-2'), withToday)
+  assert.equal(withToday.some((item) => item.id === note.id), true)
+})
+
 test('toggles importance without changing other tasks', () => {
   const source = [
     { id: 'today-1', title: '重要事项', completed: false, date: '2026-09-20' },
@@ -44,6 +78,21 @@ test('toggles importance without changing other tasks', () => {
   assert.equal(marked[0].important, true)
   assert.equal(marked[1], source[1])
   assert.equal(toggleTaskImportance(marked, 'today-1')[0].important, false)
+})
+
+test('sorts important tasks first while preserving order within each group', () => {
+  const source = [
+    { id: 'normal-1', important: false },
+    { id: 'delayed-important', important: true, carryoverCount: 4 },
+    { id: 'normal-2' },
+    { id: 'current-important', important: true },
+  ]
+  assert.deepEqual([...source].sort(compareTaskImportance).map((task) => task.id), [
+    'delayed-important',
+    'current-important',
+    'normal-1',
+    'normal-2',
+  ])
 })
 
 test('carries only unfinished ordinary tasks into today without duplicating them', () => {
@@ -141,6 +190,26 @@ test('normalizes habit cycle settings to the supported range', () => {
   assert.equal(normalizeHabitWeeklyTarget(0), 1)
   assert.equal(normalizeHabitWeeklyTarget(9), 7)
   assert.equal(normalizeHabitWeeklyTarget('4'), 4)
+})
+
+test('formats habit minimum values with an explicit time unit', () => {
+  assert.deepEqual(parseHabitMinimum('25'), { value: '25', unit: HABIT_MINIMUM_UNIT_MINUTES })
+  assert.deepEqual(parseHabitMinimum('1.5 小时'), { value: '1.5', unit: HABIT_MINIMUM_UNIT_HOURS })
+  assert.deepEqual(parseHabitMinimum('完成一章'), { value: '完成一章', unit: HABIT_MINIMUM_UNIT_CUSTOM })
+  assert.equal(formatHabitMinimum('25', HABIT_MINIMUM_UNIT_MINUTES), '25 分钟')
+  assert.equal(formatHabitMinimum('1.5', HABIT_MINIMUM_UNIT_HOURS), '1.5 小时')
+  assert.equal(habitMinimumLabel('25'), '25 分钟')
+  assert.equal(habitMinimumLabel('完成一章'), '完成一章')
+})
+
+test('migrates a legacy numeric habit minimum to minutes without changing custom text', () => {
+  const migrated = migrateTasks([
+    { id: 'reading', bucket: HABIT_BUCKET, habitMinimum: '25' },
+    { id: 'writing', bucket: HABIT_BUCKET, habitMinimum: '完成一章' },
+  ])
+  assert.equal(migrated[0].habitMinimum, '25 分钟')
+  assert.equal(migrated[1].habitMinimum, '完成一章')
+  assert.deepEqual(migrateTasks(migrated), migrated)
 })
 
 test('allows only one focused habit and keeps the same record when joining today', () => {

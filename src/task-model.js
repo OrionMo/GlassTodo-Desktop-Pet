@@ -1,9 +1,13 @@
 export const IDEA_BUCKET = 'idea'
+export const NOTE_BUCKET = 'note'
 export const DEADLINE_BUCKET = 'deadline'
 export const HABIT_BUCKET = 'habit'
 export const HABIT_STATE_CANDIDATE = 'candidate'
 export const HABIT_STATE_ACTIVE = 'active'
 export const HABIT_STATE_FINISHED = 'finished'
+export const HABIT_MINIMUM_UNIT_MINUTES = 'minutes'
+export const HABIT_MINIMUM_UNIT_HOURS = 'hours'
+export const HABIT_MINIMUM_UNIT_CUSTOM = 'custom'
 export const REVIEW_BUCKET = 'review'
 export const REVIEW_FILTER_ALL = 'all'
 export const REVIEW_STATUS_PENDING = 'pending'
@@ -24,6 +28,7 @@ const validIdeaTags = new Set([IDEA_TAG_GOAL, IDEA_TAG_INTEREST])
 const reminderTimePattern = /^(?:[01]\d|2[0-3]):[0-5]\d$/
 const deadlineDatePattern = /^\d{4}-\d{2}-\d{2}$/
 const habitDurations = new Set([30, 45, 60])
+const habitMinimumUnits = new Set([HABIT_MINIMUM_UNIT_MINUTES, HABIT_MINIMUM_UNIT_HOURS, HABIT_MINIMUM_UNIT_CUSTOM])
 const reviewStatuses = new Set([REVIEW_STATUS_PENDING, REVIEW_STATUS_VERIFY, REVIEW_STATUS_IMPROVED])
 const reviewCategories = new Set([REVIEW_CATEGORY_PREPARATION, REVIEW_CATEGORY_TIME, REVIEW_CATEGORY_ATTENTION, REVIEW_CATEGORY_COMMUNICATION, REVIEW_CATEGORY_INFORMATION, REVIEW_CATEGORY_PROCESS, REVIEW_CATEGORY_OTHER])
 
@@ -32,17 +37,50 @@ function normalizeIdeaTags(value) {
   return [...new Set(value.filter((tag) => validIdeaTags.has(tag)))]
 }
 
+export function parseHabitMinimum(value) {
+  const normalized = typeof value === 'string' || typeof value === 'number' ? String(value).trim() : ''
+  const match = normalized.match(/^(\d+(?:\.\d+)?)\s*(分钟|小时)?$/)
+  const amount = match ? Number(match[1]) : Number.NaN
+  if (!match || !Number.isFinite(amount) || amount <= 0) return { value: normalized, unit: HABIT_MINIMUM_UNIT_CUSTOM }
+  return {
+    value: String(amount),
+    unit: match[2] === '小时' ? HABIT_MINIMUM_UNIT_HOURS : HABIT_MINIMUM_UNIT_MINUTES,
+  }
+}
+
+export function formatHabitMinimum(value, unit = HABIT_MINIMUM_UNIT_MINUTES) {
+  const normalizedUnit = habitMinimumUnits.has(unit) ? unit : HABIT_MINIMUM_UNIT_MINUTES
+  const normalizedValue = typeof value === 'string' || typeof value === 'number' ? String(value).trim() : ''
+  if (normalizedUnit === HABIT_MINIMUM_UNIT_CUSTOM) return normalizedValue
+  const amount = Number(normalizedValue)
+  if (!Number.isFinite(amount) || amount <= 0) return ''
+  const label = normalizedUnit === HABIT_MINIMUM_UNIT_HOURS ? '小时' : '分钟'
+  return `${amount} ${label}`
+}
+
+export function habitMinimumLabel(value) {
+  const parsed = parseHabitMinimum(value)
+  return formatHabitMinimum(parsed.value, parsed.unit)
+}
+
 export function migrateTasks(tasks) {
   if (!Array.isArray(tasks)) return []
 
   return tasks.map((task) => {
     if (!task || typeof task !== 'object') return task
-    if (task.bucket !== 'unfinished' && task.bucket !== IDEA_BUCKET) return task
+    let migrated = task
+
+    if (task.bucket === HABIT_BUCKET) {
+      const minimum = habitMinimumLabel(task.habitMinimum)
+      if (minimum && minimum !== task.habitMinimum) migrated = { ...migrated, habitMinimum: minimum }
+    }
+
+    if (task.bucket !== 'unfinished' && task.bucket !== IDEA_BUCKET) return migrated
 
     const ideaTags = normalizeIdeaTags(task.ideaTags)
-    if (task.bucket === IDEA_BUCKET && JSON.stringify(ideaTags) === JSON.stringify(task.ideaTags || [])) return task
+    if (task.bucket === IDEA_BUCKET && JSON.stringify(ideaTags) === JSON.stringify(task.ideaTags || [])) return migrated
 
-    return { ...task, bucket: IDEA_BUCKET, ideaTags }
+    return { ...migrated, bucket: IDEA_BUCKET, ideaTags }
   })
 }
 
@@ -50,6 +88,54 @@ export function ideaMatchesFilter(task, filter) {
   if (task?.bucket !== IDEA_BUCKET) return false
   if (filter === IDEA_FILTER_ALL) return true
   return normalizeIdeaTags(task.ideaTags).includes(filter)
+}
+
+export function noteDisplayTitle(note) {
+  const title = typeof note?.title === 'string' ? note.title.trim() : ''
+  if (title) return title
+  const content = typeof note?.noteContent === 'string' ? note.noteContent.trim() : ''
+  const firstLine = content.split(/\r?\n/).find((line) => line.trim())?.trim() || ''
+  return firstLine.slice(0, 36) || '无标题笔记'
+}
+
+export function noteMatchesQuery(note, query) {
+  if (note?.bucket !== NOTE_BUCKET) return false
+  const normalized = typeof query === 'string' ? query.trim().toLocaleLowerCase() : ''
+  if (!normalized) return true
+  return `${note.title || ''}\n${note.noteContent || ''}`.toLocaleLowerCase().includes(normalized)
+}
+
+export function compareNotes(left, right) {
+  if (Boolean(left?.notePinned) !== Boolean(right?.notePinned)) return left?.notePinned ? -1 : 1
+  const leftUpdated = Date.parse(left?.noteUpdatedAt || left?.noteCreatedAt || '') || 0
+  const rightUpdated = Date.parse(right?.noteUpdatedAt || right?.noteCreatedAt || '') || 0
+  return rightUpdated - leftUpdated
+}
+
+export function upsertNote(tasks, note) {
+  if (!Array.isArray(tasks) || !note?.id || note.bucket !== NOTE_BUCKET || !String(note.noteContent || '').trim()) return Array.isArray(tasks) ? tasks : []
+  const index = tasks.findIndex((task) => task?.id === note.id)
+  if (index < 0) return [note, ...tasks]
+  return tasks.map((task, taskIndex) => taskIndex === index ? note : task)
+}
+
+export function toggleNotePinned(tasks, id, updatedAt = new Date().toISOString()) {
+  if (!Array.isArray(tasks)) return []
+  return tasks.map((task) => task?.id === id && task.bucket === NOTE_BUCKET ? { ...task, notePinned: !task.notePinned, noteUpdatedAt: updatedAt } : task)
+}
+
+export function addNoteToToday(tasks, noteId, todayDate, taskId) {
+  if (!Array.isArray(tasks) || !normalizeDeadlineDate(todayDate) || !taskId) return Array.isArray(tasks) ? tasks : []
+  const note = tasks.find((task) => task?.id === noteId && task.bucket === NOTE_BUCKET)
+  if (!note || tasks.some((task) => task?.sourceNoteId === noteId && task.date === todayDate && !task.completed)) return tasks
+  return [{ id: taskId, title: noteDisplayTitle(note), completed: false, date: todayDate, sourceNoteId: noteId }, ...tasks]
+}
+
+export function addNoteToIdeas(tasks, noteId, ideaId) {
+  if (!Array.isArray(tasks) || !ideaId) return Array.isArray(tasks) ? tasks : []
+  const note = tasks.find((task) => task?.id === noteId && task.bucket === NOTE_BUCKET)
+  if (!note || tasks.some((task) => task?.sourceNoteId === noteId && task.bucket === IDEA_BUCKET)) return tasks
+  return [{ id: ideaId, title: noteDisplayTitle(note), completed: false, bucket: IDEA_BUCKET, ideaTags: [], sourceNoteId: noteId }, ...tasks]
 }
 
 export function normalizeReviewStatus(value) {
@@ -143,6 +229,13 @@ export function carryOverUnfinishedTasks(tasks, todayDate) {
 export function carryoverLabel(task) {
   const days = Math.max(1, Math.floor(Number(task?.carryoverCount) || 1))
   return days === 1 ? '昨日未完成' : `延续 ${days} 天`
+}
+
+export function compareTaskImportance(left, right) {
+  const leftImportant = Boolean(left?.important)
+  const rightImportant = Boolean(right?.important)
+  if (leftImportant === rightImportant) return 0
+  return leftImportant ? -1 : 1
 }
 
 export function normalizeDeadlineDate(value) {

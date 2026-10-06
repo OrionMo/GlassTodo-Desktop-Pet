@@ -2,6 +2,7 @@ const { app, BrowserWindow, ipcMain, Notification, screen } = require('electron'
 const path = require('node:path')
 const fs = require('node:fs')
 const { chooseTaskSnapshot } = require('./task-storage.cjs')
+const { calculateAnchoredPosition, clamp, constrainBoundsToWorkArea, normalizePoint } = require('./drag-geometry.cjs')
 
 // Transparent Electron windows can render as opaque rectangles on some
 // Windows GPU/driver combinations. Prefer the stable software compositor.
@@ -17,8 +18,11 @@ let mainWindow
 let expanded = false
 let direction = 'left'
 let dragState = null
-let dragTimeout = null
-let resizeTimer = null
+let dragSessionSequence = 0
+let dragDiagnosticTimer = null
+let dragDiagnosticPath = null
+let geometryTransitioning = false
+let pendingReminder = null
 let reminderTimer = null
 let reminderHideTimer = null
 let reminderVisible = false
@@ -27,46 +31,180 @@ let taskSyncTimer = null
 let lastTaskSignature = null
 const qaMode = process.argv.includes('--qa')
 const reminderTestMode = process.argv.includes('--test-reminder')
+const dragDiagnosticsEnabled = process.argv.includes('--drag-diagnostics') || process.env.GLASSTODO_DRAG_DIAGNOSTICS === '1'
 if (qaMode) app.setPath('userData', path.join(__dirname, '..', '.qa-user-data'))
 const hasSingleInstanceLock = app.requestSingleInstanceLock()
 
-const clamp = (value, min, max) => Math.min(Math.max(value, min), max)
-
-function normalizePoint(point) {
-  const x = Number(point?.x)
-  const y = Number(point?.y)
-  if (!Number.isFinite(x) || !Number.isFinite(y)) return null
-  return { x: Math.round(x), y: Math.round(y) }
+function writeDragDiagnostic(event, details = {}) {
+  if (!dragDiagnosticsEnabled) return
+  try {
+    if (!dragDiagnosticPath) {
+      const directory = path.join(app.getPath('userData'), 'diagnostics')
+      fs.mkdirSync(directory, { recursive: true })
+      dragDiagnosticPath = path.join(directory, 'drag-diagnostics.ndjson')
+    }
+    const entry = JSON.stringify({ at: new Date().toISOString(), event, ...details })
+    fs.appendFile(dragDiagnosticPath, `${entry}\n`, () => {})
+  } catch {}
 }
 
-function clearDragState() {
+function describeWindowState() {
+  return {
+    expanded,
+    reminderVisible,
+    geometryTransitioning,
+  }
+}
+
+function recordGeometryWrite(source, targetBounds) {
+  if (!dragDiagnosticsEnabled || source === 'drag-move') return
+  writeDragDiagnostic('geometry-write', {
+    source,
+    targetBounds,
+    actualBounds: mainWindow && !mainWindow.isDestroyed() ? mainWindow.getBounds() : null,
+    dragSessionId: dragState?.id || null,
+    ...describeWindowState(),
+  })
+}
+
+function setWindowBounds(targetBounds, source) {
+  if (!mainWindow || mainWindow.isDestroyed()) return false
+  recordGeometryWrite(source, targetBounds)
+  mainWindow.setBounds(targetBounds, false)
+  return true
+}
+
+function sampleDragDiagnostics() {
+  if (!dragState || !mainWindow || mainWindow.isDestroyed()) return
+  const cursor = screen.getCursorScreenPoint()
+  const actualBounds = mainWindow.getBounds()
+  const ideal = calculateAnchoredPosition(dragState.bounds, dragState.point, cursor)
+  const display = screen.getDisplayNearestPoint(cursor)
+  const formerlyClamped = constrainBoundsToWorkArea({ ...COLLAPSED, ...ideal }, display.workArea)
+  writeDragDiagnostic('sample', {
+    dragSessionId: dragState.id,
+    startedAt: dragState.startedAt,
+    cursor,
+    startCursor: dragState.point,
+    startBounds: dragState.bounds,
+    actualBounds,
+    ideal,
+    error: ideal ? { x: actualBounds.x - ideal.x, y: actualBounds.y - ideal.y } : null,
+    formerClampCorrection: ideal && formerlyClamped ? { x: formerlyClamped.x - ideal.x, y: formerlyClamped.y - ideal.y } : null,
+    lastMoveReceivedAt: dragState.lastMoveReceivedAt,
+    lastMoveSentAt: dragState.lastMoveSentAt,
+    estimatedTransportDelayMs: dragState.lastMoveSentAt ? Math.max(0, dragState.lastMoveReceivedAt - dragState.lastMoveSentAt) : null,
+    display: { id: display.id, scaleFactor: display.scaleFactor, workArea: display.workArea },
+    ...describeWindowState(),
+  })
+}
+
+function startDragDiagnostics() {
+  if (!dragDiagnosticsEnabled || dragDiagnosticTimer) return
+  sampleDragDiagnostics()
+  dragDiagnosticTimer = setInterval(sampleDragDiagnostics, 100)
+}
+
+function stopDragDiagnostics() {
+  if (dragDiagnosticTimer) clearInterval(dragDiagnosticTimer)
+  dragDiagnosticTimer = null
+}
+
+function clearDragState(reason = 'cleared') {
+  const endedDrag = dragState
   dragState = null
-  if (dragTimeout) clearTimeout(dragTimeout)
-  dragTimeout = null
+  stopDragDiagnostics()
+  if (endedDrag) {
+    writeDragDiagnostic('end', {
+      dragSessionId: endedDrag.id,
+      startedAt: endedDrag.startedAt,
+      endedAt: Date.now(),
+      reason,
+      actualBounds: mainWindow && !mainWindow.isDestroyed() ? mainWindow.getBounds() : null,
+      ...describeWindowState(),
+    })
+  }
+  return endedDrag
 }
 
-function refreshDragTimeout() {
-  if (dragTimeout) clearTimeout(dragTimeout)
-  dragTimeout = setTimeout(clearDragState, 1500)
-}
-
-function beginDragAt(cursorPoint) {
-  const normalizedPoint = normalizePoint(cursorPoint)
-  if (!normalizedPoint || !mainWindow || mainWindow.isDestroyed()) return
-  dragState = { point: normalizedPoint, bounds: mainWindow.getBounds() }
-  refreshDragTimeout()
-}
-
-function moveDragTo(cursorPoint) {
-  const normalizedPoint = normalizePoint(cursorPoint)
-  if (!dragState || !normalizedPoint || expanded || reminderVisible || !mainWindow || mainWindow.isDestroyed()) return
-  refreshDragTimeout()
-  const area = screen.getDisplayNearestPoint(normalizedPoint).workArea
-  const nextX = Math.round(clamp(dragState.bounds.x + normalizedPoint.x - dragState.point.x, area.x, area.x + area.width - COLLAPSED.width))
-  const nextY = Math.round(clamp(dragState.bounds.y + normalizedPoint.y - dragState.point.y, area.y, area.y + area.height - COLLAPSED.height))
+function constrainWindowToWorkArea(source = 'drag-end-constrain') {
+  if (!mainWindow || mainWindow.isDestroyed()) return false
   const current = mainWindow.getBounds()
-  if (current.x === nextX && current.y === nextY) return
-  mainWindow.setPosition(nextX, nextY, false)
+  const display = screen.getDisplayMatching(current)
+  const target = constrainBoundsToWorkArea(current, display.workArea)
+  if (!target || (target.x === current.x && target.y === current.y)) return false
+  return setWindowBounds(target, source)
+}
+
+function flushPendingReminder() {
+  if (!pendingReminder || dragState) return
+  const reminderPayload = pendingReminder
+  pendingReminder = null
+  showInAppReminder(reminderPayload)
+}
+
+function finishDrag(reason = 'pointerup', constrain = true) {
+  const endedDrag = clearDragState(reason)
+  if (!endedDrag) return false
+  if (constrain) constrainWindowToWorkArea(`drag-end:${reason}`)
+  flushPendingReminder()
+  return true
+}
+
+function validateDragRequest(request) {
+  if (request?.pointerType !== 'mouse') return 'not-mouse'
+  if (request?.isPrimary !== true) return 'not-primary'
+  if (Number(request?.button) !== 0 || (Number(request?.buttons) & 1) !== 1) return 'not-left-button'
+  if (!mainWindow || mainWindow.isDestroyed()) return 'window-unavailable'
+  if (expanded) return 'panel-expanded'
+  if (reminderVisible) return 'reminder-visible'
+  if (geometryTransitioning) return 'geometry-transition'
+  if (dragState) return 'already-dragging'
+  const bounds = mainWindow.getBounds()
+  // Frameless transparent windows can report a few extra DIPs for invisible
+  // Windows borders and scale rounding. Reject panel/reminder sizes while
+  // accepting that small platform variance around the collapsed geometry.
+  if (Math.abs(bounds.width - COLLAPSED.width) > 8 || Math.abs(bounds.height - COLLAPSED.height) > 8) return 'unexpected-window-size'
+  return null
+}
+
+function beginDragAt(cursorPoint, request) {
+  const rejectionReason = validateDragRequest(request)
+  const normalizedPoint = normalizePoint(cursorPoint)
+  if (rejectionReason || !normalizedPoint) {
+    const reason = rejectionReason || 'invalid-cursor'
+    writeDragDiagnostic('start-rejected', { reason, request, cursorPoint, ...describeWindowState() })
+    return { started: false, reason }
+  }
+  dragState = {
+    id: ++dragSessionSequence,
+    point: normalizedPoint,
+    bounds: mainWindow.getBounds(),
+    startedAt: Date.now(),
+    lastMoveReceivedAt: null,
+    lastMoveSentAt: null,
+  }
+  writeDragDiagnostic('start', {
+    dragSessionId: dragState.id,
+    startCursor: dragState.point,
+    startBounds: dragState.bounds,
+    ...describeWindowState(),
+  })
+  startDragDiagnostics()
+  return { started: true, sessionId: dragState.id }
+}
+
+function moveDragTo(cursorPoint, movePayload) {
+  const normalizedPoint = normalizePoint(cursorPoint)
+  if (!dragState || !normalizedPoint || expanded || reminderVisible || geometryTransitioning || !mainWindow || mainWindow.isDestroyed()) return false
+  dragState.lastMoveReceivedAt = Date.now()
+  dragState.lastMoveSentAt = Number.isFinite(Number(movePayload?.sentAt)) ? Number(movePayload.sentAt) : null
+  const next = calculateAnchoredPosition(dragState.bounds, dragState.point, normalizedPoint)
+  if (!next) return false
+  const current = mainWindow.getBounds()
+  if (current.x === next.x && current.y === next.y) return true
+  mainWindow.setPosition(next.x, next.y, false)
+  return true
 }
 
 function sendPanelState() {
@@ -87,12 +225,17 @@ function hideInAppReminder() {
   reminderVisible = false
   activeReminder = null
   sendReminderState()
-  mainWindow.setBounds({ x: clamp(x, area.x, area.x + area.width - COLLAPSED.width), y: current.y, ...COLLAPSED }, false)
+  setWindowBounds({ x: clamp(x, area.x, area.x + area.width - COLLAPSED.width), y: current.y, ...COLLAPSED }, 'reminder-hide')
   mainWindow.webContents.invalidate()
 }
 
 function showInAppReminder(reminderPayload = createReminderPayload()) {
   if (!mainWindow || mainWindow.isDestroyed() || expanded) return false
+  if (dragState) {
+    pendingReminder = reminderPayload
+    writeDragDiagnostic('reminder-deferred', { dragSessionId: dragState.id, reminder: reminderPayload })
+    return true
+  }
   activeReminder = reminderPayload
   if (reminderVisible) {
     if (reminderHideTimer) clearTimeout(reminderHideTimer)
@@ -105,7 +248,7 @@ function showInAppReminder(reminderPayload = createReminderPayload()) {
   direction = current.x + current.width / 2 > area.x + area.width / 2 ? 'left' : 'right'
   const x = direction === 'left' ? current.x - (REMINDER.width - COLLAPSED.width) : current.x
   reminderVisible = true
-  mainWindow.setBounds({ x: clamp(x, area.x, area.x + area.width - REMINDER.width), y: current.y, ...REMINDER }, false)
+  setWindowBounds({ x: clamp(x, area.x, area.x + area.width - REMINDER.width), y: current.y, ...REMINDER }, 'reminder-show')
   mainWindow.webContents.invalidate()
   sendReminderState()
   reminderHideTimer = setTimeout(hideInAppReminder, REMINDER_VISIBLE_MS)
@@ -135,29 +278,21 @@ function targetBounds(nextExpanded) {
 }
 
 function togglePanel() {
-  if (resizeTimer) {
-    clearTimeout(resizeTimer)
-    resizeTimer = null
-  }
-
+  if (!mainWindow || mainWindow.isDestroyed()) return { expanded, direction }
+  if (dragState) finishDrag('panel-toggle', true)
   if (reminderVisible) hideInAppReminder()
 
   const nextExpanded = !expanded
   const target = targetBounds(nextExpanded)
   expanded = nextExpanded
 
-  if (expanded) {
-    mainWindow.setBounds(target, false)
+  geometryTransitioning = true
+  try {
+    setWindowBounds(target, expanded ? 'panel-expand' : 'panel-collapse')
     mainWindow.webContents.invalidate()
     sendPanelState()
-  } else {
-    sendPanelState()
-    resizeTimer = setTimeout(() => {
-      resizeTimer = null
-      if (!mainWindow || mainWindow.isDestroyed() || expanded) return
-      mainWindow.setBounds(target, false)
-      mainWindow.webContents.invalidate()
-    }, 190)
+  } finally {
+    geometryTransitioning = false
   }
 
   return { expanded, direction }
@@ -170,6 +305,7 @@ function collapsePanel() {
 
 function openPanelFromReminder(reminderPayload = activeReminder) {
   if (!mainWindow || mainWindow.isDestroyed()) return
+  if (dragState) finishDrag('reminder-open', true)
   if (reminderVisible) hideInAppReminder()
   if (!expanded) togglePanel()
   mainWindow.show()
@@ -318,6 +454,8 @@ async function runQA() {
   const outputRoot = path.join(__dirname, '..')
   await new Promise((resolve) => setTimeout(resolve, 180))
   const collapsedBounds = mainWindow.getBounds()
+  const collapsedContentBounds = mainWindow.getContentBounds()
+  const displayState = screen.getDisplayMatching(collapsedBounds)
   const launcherState = await mainWindow.webContents.executeJavaScript(`(() => {
     const launcher = document.querySelector('.pet-launcher')
     const rect = launcher?.getBoundingClientRect()
@@ -346,15 +484,20 @@ async function runQA() {
   fs.writeFileSync(path.join(outputRoot, 'desktop-qa-reminder.png'), reminderImage.toPNG())
   hideInAppReminder()
   await new Promise((resolve) => setTimeout(resolve, 100))
-  beginDragAt({ x: 100.25, y: 100.5 })
-  moveDragTo({ x: 117.75, y: 112.25 })
+  beginDragAt({ x: 100.25, y: 100.5 }, { pointerType: 'mouse', isPrimary: true, button: 0, buttons: 1 })
+  moveDragTo({ x: 117.75, y: 112.25 }, { buttons: 1, sentAt: Date.now() })
   await new Promise((resolve) => setTimeout(resolve, 100))
   const draggedBounds = mainWindow.getBounds()
-  moveDragTo({ x: 117.75, y: 112.25 })
+  await new Promise((resolve) => setTimeout(resolve, 2100))
+  moveDragTo({ x: 127.75, y: 122.25 }, { buttons: 1, sentAt: Date.now() })
+  await new Promise((resolve) => setTimeout(resolve, 100))
+  const resumedAfterHoldBounds = mainWindow.getBounds()
+  moveDragTo({ x: 127.75, y: 122.25 }, { buttons: 1, sentAt: Date.now() })
   await new Promise((resolve) => setTimeout(resolve, 100))
   const stationaryBounds = mainWindow.getBounds()
-  clearDragState()
-  moveDragTo({ x: 600, y: 600 })
+  finishDrag('qa-release', true)
+  const releasedBounds = mainWindow.getBounds()
+  moveDragTo({ x: 600, y: 600 }, { buttons: 1, sentAt: Date.now() })
   await new Promise((resolve) => setTimeout(resolve, 100))
   const afterReleaseBounds = mainWindow.getBounds()
   await mainWindow.webContents.executeJavaScript("document.querySelector('.pet-launcher')?.click()")
@@ -418,7 +561,7 @@ async function runQA() {
   })()`)
   await syncTasksFromRenderer()
   const persistedTasks = readPersistedTasks()
-  fs.writeFileSync(path.join(outputRoot, 'desktop-qa.json'), JSON.stringify({ collapsedBounds, launcherState, reminderBounds, reminderState, draggedBounds, stationaryBounds, afterReleaseBounds, expandedBounds, ideaFlow, collapsedAgainBounds, expandedAgainBounds, collapsedByOutsideClickBounds, expandedByReminderBounds, closeButtonState, persistence: { filePath: getTasksFilePath(), taskCount: persistedTasks?.length ?? 0, jsonBacked: Array.isArray(persistedTasks) }, direction, resizeStrategy: 'single-step', outsideClickCollapse: true, reminder: { supported: Notification.isSupported(), intervalMs: REMINDER_INTERVAL_MS, visibleMs: REMINDER_VISIBLE_MS, payload: createReminderPayload(), clickOpensPanel: expandedByReminderBounds.width >= EXPANDED.width } }, null, 2))
+  fs.writeFileSync(path.join(outputRoot, 'desktop-qa.json'), JSON.stringify({ collapsedBounds, collapsedContentBounds, display: { id: displayState.id, scaleFactor: displayState.scaleFactor, workArea: displayState.workArea }, launcherState, reminderBounds, reminderState, draggedBounds, resumedAfterHoldBounds, stationaryBounds, releasedBounds, afterReleaseBounds, dragChecks: { resumedAfterTwoSeconds: resumedAfterHoldBounds.x !== draggedBounds.x || resumedAfterHoldBounds.y !== draggedBounds.y, stationaryAfterRepeatedPoint: stationaryBounds.x === resumedAfterHoldBounds.x && stationaryBounds.y === resumedAfterHoldBounds.y, releasedWindowIgnoresMovement: afterReleaseBounds.x === releasedBounds.x && afterReleaseBounds.y === releasedBounds.y }, expandedBounds, ideaFlow, collapsedAgainBounds, expandedAgainBounds, collapsedByOutsideClickBounds, expandedByReminderBounds, closeButtonState, persistence: { filePath: getTasksFilePath(), taskCount: persistedTasks?.length ?? 0, jsonBacked: Array.isArray(persistedTasks) }, direction, resizeStrategy: 'single-step', outsideClickCollapse: true, reminder: { supported: Notification.isSupported(), intervalMs: REMINDER_INTERVAL_MS, visibleMs: REMINDER_VISIBLE_MS, payload: createReminderPayload(), clickOpensPanel: expandedByReminderBounds.width >= EXPANDED.width } }, null, 2))
   if (closeButtonState.exists) {
     await mainWindow.webContents.executeJavaScript("document.querySelector('.window-close-button')?.click()")
     return
@@ -450,22 +593,34 @@ function createWindow() {
     },
   })
   mainWindow.setAlwaysOnTop(true, 'floating')
-  mainWindow.on('blur', collapsePanel)
+  mainWindow.on('blur', () => {
+    finishDrag('window-blur', true)
+    collapsePanel()
+  })
+  mainWindow.on('closed', () => {
+    clearDragState('window-closed')
+    pendingReminder = null
+    mainWindow = null
+  })
+  mainWindow.webContents.on('render-process-gone', () => clearDragState('render-process-gone'))
   mainWindow.loadFile(path.join(__dirname, '..', 'dist', 'client', 'index.html'))
   mainWindow.webContents.once('did-finish-load', async () => {
     await installWindowControls()
     scheduleTaskSync()
     const initialBounds = mainWindow.getBounds()
-    mainWindow.setBounds({ ...initialBounds, width: initialBounds.width + 1 }, false)
-    mainWindow.showInactive()
-    setTimeout(() => {
-      mainWindow.setBounds(initialBounds, false)
+    geometryTransitioning = true
+    try {
+      setWindowBounds({ ...initialBounds, width: initialBounds.width + 1 }, 'startup-render-prime')
+      setWindowBounds(initialBounds, 'startup-render-restore')
       mainWindow.webContents.invalidate()
       sendPanelState()
       sendReminderState()
-      if (qaMode) runQA()
-      else if (reminderTestMode) setTimeout(showTodoReminder, 600)
-    }, 40)
+    } finally {
+      geometryTransitioning = false
+    }
+    mainWindow.showInactive()
+    if (qaMode) setTimeout(runQA, 40)
+    else if (reminderTestMode) setTimeout(showTodoReminder, 600)
   })
 }
 
@@ -489,15 +644,17 @@ if (!hasSingleInstanceLock) {
     ipcMain.removeAllListeners('window:drag-start')
     ipcMain.removeAllListeners('window:drag-move')
     ipcMain.removeAllListeners('window:drag-end')
-    ipcMain.on('window:drag-start', () => beginDragAt(screen.getCursorScreenPoint()))
+    ipcMain.on('window:drag-start', (event, request) => {
+      event.returnValue = beginDragAt(screen.getCursorScreenPoint(), request)
+    })
     ipcMain.on('window:drag-move', (_event, point) => {
       if ((Number(point?.buttons) & 1) !== 1) {
-        clearDragState()
+        finishDrag('buttons-released', true)
         return
       }
-      moveDragTo(screen.getCursorScreenPoint())
+      moveDragTo(screen.getCursorScreenPoint(), point)
     })
-    ipcMain.on('window:drag-end', clearDragState)
+    ipcMain.on('window:drag-end', (_event, reason) => finishDrag(typeof reason === 'string' ? reason : 'pointerup', true))
     ipcMain.on('tasks:load-sync', (event) => {
       event.returnValue = readPersistedTaskSnapshot()
     })
@@ -517,6 +674,8 @@ if (!hasSingleInstanceLock) {
   })
 
   app.on('before-quit', () => {
+    clearDragState('app-before-quit')
+    pendingReminder = null
     if (reminderTimer) clearInterval(reminderTimer)
     reminderTimer = null
     if (reminderHideTimer) clearTimeout(reminderHideTimer)

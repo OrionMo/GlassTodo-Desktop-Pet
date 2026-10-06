@@ -1,4 +1,4 @@
-const CACHE_NAME = 'glasstodo-v7.9.0'
+const CACHE_NAME = 'glasstodo-v7.10.0'
 const APP_SHELL = ['./', './index.html', './manifest.webmanifest', './icon.svg']
 
 self.addEventListener('install', (event) => {

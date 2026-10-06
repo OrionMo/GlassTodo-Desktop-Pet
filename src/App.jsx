@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowClockwise, ArrowRight, CalendarBlank, CaretDown, CheckCircle, Cloud, CloudCheck, CloudSlash, Clock, Coffee, Flag, ListChecks, PencilSimple, Play, SignOut, Target, Trash, WarningCircle } from '@phosphor-icons/react'
-import { DEADLINE_BUCKET, HABIT_BUCKET, HABIT_STATE_ACTIVE, HABIT_STATE_CANDIDATE, HABIT_STATE_FINISHED, IDEA_BUCKET, IDEA_FILTER_ALL, IDEA_TAG_GOAL, IDEA_TAG_INTEREST, REVIEW_BUCKET, REVIEW_CATEGORY_ATTENTION, REVIEW_CATEGORY_COMMUNICATION, REVIEW_CATEGORY_INFORMATION, REVIEW_CATEGORY_OTHER, REVIEW_CATEGORY_PREPARATION, REVIEW_CATEGORY_PROCESS, REVIEW_CATEGORY_TIME, REVIEW_FILTER_ALL, REVIEW_STATUS_IMPROVED, REVIEW_STATUS_PENDING, REVIEW_STATUS_VERIFY, addReviewActionToHabits, addReviewActionToToday, carryOverUnfinishedTasks, carryoverLabel, compareDeadlineTasks, deadlineStatus, findDueTaskReminders, finishHabitCycle, habitProgress, ideaMatchesFilter, incrementReviewOccurrence, markTaskReminderFired, migrateTasks, moveDeadlineToToday, moveHabitToToday, normalizeDeadlineDate, normalizeHabitDuration, normalizeHabitWeeklyTarget, normalizeReminderTime, normalizeReviewCategory, normalizeReviewStatus, recordHabitCheckIn, recordHabitRest, reminderOccurrenceKey, reviewMatchesFilter, setTaskReminder, startHabitCycle, toggleTaskImportance } from './task-model.js'
+import { ArrowClockwise, ArrowRight, CalendarBlank, CaretDown, CheckCircle, Cloud, CloudCheck, CloudSlash, Clock, Coffee, Flag, ListChecks, MagnifyingGlass, NotePencil, PencilSimple, Play, PushPin, SignOut, Target, Trash, WarningCircle } from '@phosphor-icons/react'
+import { DEADLINE_BUCKET, HABIT_BUCKET, HABIT_MINIMUM_UNIT_CUSTOM, HABIT_MINIMUM_UNIT_HOURS, HABIT_MINIMUM_UNIT_MINUTES, HABIT_STATE_ACTIVE, HABIT_STATE_CANDIDATE, HABIT_STATE_FINISHED, IDEA_BUCKET, IDEA_FILTER_ALL, IDEA_TAG_GOAL, IDEA_TAG_INTEREST, NOTE_BUCKET, REVIEW_BUCKET, REVIEW_CATEGORY_ATTENTION, REVIEW_CATEGORY_COMMUNICATION, REVIEW_CATEGORY_INFORMATION, REVIEW_CATEGORY_OTHER, REVIEW_CATEGORY_PREPARATION, REVIEW_CATEGORY_PROCESS, REVIEW_CATEGORY_TIME, REVIEW_FILTER_ALL, REVIEW_STATUS_IMPROVED, REVIEW_STATUS_PENDING, REVIEW_STATUS_VERIFY, addNoteToIdeas, addNoteToToday, addReviewActionToHabits, addReviewActionToToday, carryOverUnfinishedTasks, carryoverLabel, compareDeadlineTasks, compareNotes, compareTaskImportance, deadlineStatus, findDueTaskReminders, finishHabitCycle, formatHabitMinimum, habitMinimumLabel, habitProgress, ideaMatchesFilter, incrementReviewOccurrence, markTaskReminderFired, migrateTasks, moveDeadlineToToday, moveHabitToToday, normalizeDeadlineDate, normalizeHabitDuration, normalizeHabitWeeklyTarget, normalizeReminderTime, normalizeReviewCategory, normalizeReviewStatus, noteDisplayTitle, noteMatchesQuery, parseHabitMinimum, recordHabitCheckIn, recordHabitRest, reminderOccurrenceKey, reviewMatchesFilter, setTaskReminder, startHabitCycle, toggleNotePinned, toggleTaskImportance, upsertNote } from './task-model.js'
 import { useCloudSync } from './use-cloud-sync.js'
 
 const seedTitles = ['整理会议资料', '回复客户邮件', '完成产品方案初稿']
@@ -31,6 +31,12 @@ function dateLabel(offsetDays) {
   return `${now.getFullYear()}-${month}-${day}`
 }
 
+function formatNoteTime(value) {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return '刚刚'
+  return new Intl.DateTimeFormat('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }).format(date)
+}
+
 function loadTasks() {
   try {
     const saved = localStorage.getItem('glass-todo.tasks.v2')
@@ -53,6 +59,7 @@ export function App() {
   const [deadlineTime, setDeadlineTime] = useState('')
   const [habitName, setHabitName] = useState('')
   const [habitMinimum, setHabitMinimum] = useState('')
+  const [habitMinimumUnit, setHabitMinimumUnit] = useState(HABIT_MINIMUM_UNIT_MINUTES)
   const [habitDuration, setHabitDuration] = useState('45')
   const [habitWeeklyTarget, setHabitWeeklyTarget] = useState('4')
   const [editingHabitId, setEditingHabitId] = useState(null)
@@ -64,6 +71,9 @@ export function App() {
   const [selectedDay, setSelectedDay] = useState('today')
   const [todayDate, setTodayDate] = useState(() => dateLabel(0))
   const [ideaFilter, setIdeaFilter] = useState(IDEA_FILTER_ALL)
+  const [ideaMode, setIdeaMode] = useState('ideas')
+  const [noteQuery, setNoteQuery] = useState('')
+  const [noteDraft, setNoteDraft] = useState(null)
   const [showCompleted, setShowCompleted] = useState(false)
   const [sinkingId, setSinkingId] = useState(null)
   const [panelOpen, setPanelOpen] = useState(!hasDesktopBridge)
@@ -78,9 +88,11 @@ export function App() {
   const [authPassword, setAuthPassword] = useState('')
   const cloud = useCloudSync(tasks, setTasks)
   const dragOrigin = useRef(null)
+  const [launcherDragging, setLauncherDragging] = useState(false)
   const suppressClick = useRef(false)
   const highlightTimer = useRef(null)
   const isIdeas = selectedDay === 'ideas'
+  const isNotebook = isIdeas && ideaMode === 'notes'
   const isDeadlines = selectedDay === 'deadlines'
   const isHabits = selectedDay === 'habits'
   const isReviews = selectedDay === 'reviews'
@@ -93,22 +105,24 @@ export function App() {
   const activeHabitProgress = activeHabit ? habitProgress(activeHabit, dateLabel(0)) : null
   const reviewItems = useMemo(() => tasks.filter((task) => reviewMatchesFilter(task, reviewFilter)).sort((left, right) => (right.reviewLastOccurredAt || right.reviewDate || '').localeCompare(left.reviewLastOccurredAt || left.reviewDate || '')), [tasks, reviewFilter])
   const reviewCount = useMemo(() => tasks.filter((task) => task?.bucket === REVIEW_BUCKET).length, [tasks])
+  const noteTasks = useMemo(() => tasks.filter((task) => task?.bucket === NOTE_BUCKET), [tasks])
+  const noteItems = useMemo(() => noteTasks.filter((note) => noteMatchesQuery(note, noteQuery)).sort(compareNotes), [noteTasks, noteQuery])
 
   const active = useMemo(() => tasks.filter((task) => {
     if (task.completed) return false
     if (isHabits || isReviews) return false
-    if (isIdeas) return ideaMatchesFilter(task, ideaFilter)
+    if (isIdeas) return !isNotebook && ideaMatchesFilter(task, ideaFilter)
     if (isDeadlines) return task.bucket === DEADLINE_BUCKET
     return task.bucket !== IDEA_BUCKET && task.bucket !== 'unfinished' && task.date === selectedDate
-  }).sort(isDeadlines ? compareDeadlineTasks : () => 0), [tasks, isIdeas, isDeadlines, isHabits, isReviews, ideaFilter, selectedDate])
+  }).sort(isDeadlines ? compareDeadlineTasks : selectedDay === 'today' ? compareTaskImportance : () => 0), [tasks, isIdeas, isNotebook, isDeadlines, isHabits, isReviews, ideaFilter, selectedDay, selectedDate])
 
   const completed = useMemo(() => tasks.filter((task) => {
     if (!task.completed) return false
     if (isHabits || isReviews) return false
-    if (isIdeas) return ideaMatchesFilter(task, ideaFilter)
+    if (isIdeas) return !isNotebook && ideaMatchesFilter(task, ideaFilter)
     if (isDeadlines) return task.bucket === DEADLINE_BUCKET
     return task.bucket !== IDEA_BUCKET && task.bucket !== 'unfinished' && task.date === selectedDate
-  }).sort(isDeadlines ? compareDeadlineTasks : () => 0), [tasks, isIdeas, isDeadlines, isHabits, isReviews, ideaFilter, selectedDate])
+  }).sort(isDeadlines ? compareDeadlineTasks : () => 0), [tasks, isIdeas, isNotebook, isDeadlines, isHabits, isReviews, ideaFilter, selectedDate])
 
   useEffect(() => {
     localStorage.setItem('glass-todo.tasks.v2', JSON.stringify(tasks))
@@ -153,7 +167,7 @@ export function App() {
       setPanelDirection(state.direction)
     })
     const unsubscribeReminderOpened = window.desktopAPI.onReminderOpened(focusReminderTask)
-    const cancelDrag = () => finishDrag(true)
+    const cancelDrag = () => finishDrag(true, 'window-blur')
     window.addEventListener('blur', cancelDrag)
     return () => {
       document.body.classList.remove('electron')
@@ -162,6 +176,8 @@ export function App() {
       unsubscribePanel()
       unsubscribeReminder()
       unsubscribeReminderOpened()
+      if (dragOrigin.current) window.desktopAPI.endDrag('component-unmount')
+      dragOrigin.current = null
       if (highlightTimer.current) window.clearTimeout(highlightTimer.current)
     }
   }, [hasDesktopBridge])
@@ -174,28 +190,37 @@ export function App() {
   }
 
   function startDrag(event) {
-    if (!hasDesktopBridge) return
+    if (!hasDesktopBridge || dragOrigin.current || event.pointerType !== 'mouse' || !event.isPrimary || event.button !== 0 || (event.buttons & 1) !== 1) return
+    const startResult = window.desktopAPI.startDrag({
+      pointerType: event.pointerType,
+      isPrimary: event.isPrimary,
+      button: event.button,
+      buttons: event.buttons,
+      sentAt: Date.now(),
+    })
+    if (!startResult?.started) return
     suppressClick.current = false
     event.currentTarget.setPointerCapture(event.pointerId)
     dragOrigin.current = { x: event.screenX, y: event.screenY, moved: false }
-    window.desktopAPI.startDrag({ x: event.screenX, y: event.screenY })
+    setLauncherDragging(true)
   }
 
   function moveDrag(event) {
     if (!hasDesktopBridge || !dragOrigin.current) return
     if ((event.buttons & 1) !== 1) {
-      finishDrag(true)
+      finishDrag(true, 'buttons-released')
       return
     }
     if (Math.hypot(event.screenX - dragOrigin.current.x, event.screenY - dragOrigin.current.y) > 4) dragOrigin.current.moved = true
-    window.desktopAPI.moveDrag({ x: event.screenX, y: event.screenY, buttons: event.buttons })
+    window.desktopAPI.moveDrag({ buttons: event.buttons, sentAt: Date.now() })
   }
 
-  function finishDrag(forceSuppress = false) {
+  function finishDrag(forceSuppress = false, reason = 'pointerup') {
     if (!hasDesktopBridge || !dragOrigin.current) return
     const moved = dragOrigin.current.moved
     dragOrigin.current = null
-    window.desktopAPI.endDrag()
+    setLauncherDragging(false)
+    window.desktopAPI.endDrag(reason)
     suppressClick.current = forceSuppress || moved
   }
 
@@ -217,12 +242,66 @@ export function App() {
 
   function selectList(day) {
     setSelectedDay(day)
+    if (day !== 'ideas') setNoteDraft(null)
     setShowCompleted(false)
     setEditingReminderId(null)
     setReminderDraft('')
     setEditingHabitId(null)
     setEditingReviewId(null)
     setConfirmAction(null)
+  }
+
+  function switchIdeaMode(mode) {
+    setIdeaMode(mode)
+    setNoteDraft(null)
+    setConfirmAction(null)
+  }
+
+  function beginNewNote() {
+    const now = new Date().toISOString()
+    setNoteDraft({
+      id: crypto.randomUUID(),
+      title: '',
+      noteContent: '',
+      notePinned: false,
+      noteCreatedAt: now,
+      noteUpdatedAt: now,
+      completed: false,
+      bucket: NOTE_BUCKET,
+    })
+    setConfirmAction(null)
+  }
+
+  function editNote(note) {
+    setNoteDraft({ ...note })
+    setConfirmAction(null)
+  }
+
+  function updateNoteDraft(field, value) {
+    if (!noteDraft) return
+    const next = { ...noteDraft, [field]: value, noteUpdatedAt: new Date().toISOString() }
+    setNoteDraft(next)
+    if (next.noteContent.trim()) setTasks((current) => upsertNote(current, next))
+  }
+
+  function pinNote(id) {
+    const updatedAt = new Date().toISOString()
+    setTasks((current) => toggleNotePinned(current, id, updatedAt))
+    setNoteDraft((current) => current?.id === id ? { ...current, notePinned: !current.notePinned, noteUpdatedAt: updatedAt } : current)
+  }
+
+  function deleteNote(id) {
+    setTasks((current) => current.filter((task) => !(task.id === id && task.bucket === NOTE_BUCKET)))
+    setNoteDraft((current) => current?.id === id ? null : current)
+    setConfirmAction(null)
+  }
+
+  function noteToToday(id) {
+    setTasks((current) => addNoteToToday(current, id, dateLabel(0), crypto.randomUUID()))
+  }
+
+  function noteToIdeas(id) {
+    setTasks((current) => addNoteToIdeas(current, id, crypto.randomUUID()))
   }
 
   function focusReminderTask(reminder) {
@@ -257,6 +336,7 @@ export function App() {
   function resetHabitForm() {
     setHabitName('')
     setHabitMinimum('')
+    setHabitMinimumUnit(HABIT_MINIMUM_UNIT_MINUTES)
     setHabitDuration('45')
     setHabitWeeklyTarget('4')
     setEditingHabitId(null)
@@ -265,7 +345,7 @@ export function App() {
   function saveHabit(event) {
     event.preventDefault()
     const title = habitName.trim()
-    const minimum = habitMinimum.trim()
+    const minimum = formatHabitMinimum(habitMinimum, habitMinimumUnit)
     if (!title || !minimum) return
     const settings = {
       title,
@@ -281,8 +361,10 @@ export function App() {
 
   function editHabit(task) {
     setConfirmAction(null)
+    const parsedMinimum = parseHabitMinimum(task.habitMinimum)
     setHabitName(task.title)
-    setHabitMinimum(task.habitMinimum || '')
+    setHabitMinimum(parsedMinimum.value)
+    setHabitMinimumUnit(parsedMinimum.unit)
     setHabitDuration(String(normalizeHabitDuration(task.habitDurationDays)))
     setHabitWeeklyTarget(String(normalizeHabitWeeklyTarget(task.habitWeeklyTarget)))
     setEditingHabitId(task.id)
@@ -505,7 +587,7 @@ export function App() {
   return (
     <main className={isDesktop ? `desktop-shell direction-${panelDirection}` : 'stage'}>
       {isDesktop && (
-        <button type="button" className={`pet-launcher ${panelOpen ? 'is-active' : ''} ${reminderVisible ? 'has-reminder' : ''}`} aria-label={panelOpen ? '收起待办' : '展开待办'} title={panelOpen ? '收起待办' : '展开待办'} onPointerDown={startDrag} onPointerMove={moveDrag} onPointerUp={() => finishDrag(false)} onPointerCancel={() => finishDrag(true)} onLostPointerCapture={() => finishDrag(true)} onClick={reminderVisible ? openReminder : handleLauncherClick}>
+        <button type="button" className={`pet-launcher ${panelOpen ? 'is-active' : ''} ${reminderVisible ? 'has-reminder' : ''} ${launcherDragging ? 'is-dragging' : ''}`} aria-label={panelOpen ? '收起待办' : '展开待办'} title={panelOpen ? '收起待办' : '展开待办'} onPointerDown={startDrag} onPointerMove={moveDrag} onPointerUp={() => finishDrag(false, 'pointerup')} onPointerCancel={() => finishDrag(true, 'pointercancel')} onLostPointerCapture={() => finishDrag(true, 'lost-pointer-capture')} onClick={reminderVisible ? openReminder : handleLauncherClick}>
           <ListChecks size={32} weight="duotone" />
         </button>
       )}
@@ -514,10 +596,10 @@ export function App() {
         <section className={`todo-window ${isIdeas ? 'is-ideas' : ''} ${isDeadlines ? 'is-deadlines' : ''} ${isHabits ? 'is-habits' : ''} ${isReviews ? 'is-reviews' : ''}`} aria-label="毛玻璃待办清单">
           {isDesktop && <button type="button" className="window-close-button" aria-label="关闭 GlassTodo" title="关闭 GlassTodo" onClick={() => window.desktopAPI.quit()}>×</button>}
           <header className="todo-header">
-            <div className="title-line"><h1>{isIdeas ? '想法' : isDeadlines ? 'DDL' : isHabits ? '习惯' : isReviews ? '复盘' : '待办'}</h1><span className="active-count">{isHabits ? (activeHabit ? 1 : 0) : isReviews ? reviewCount : active.length}</span></div>
+            <div className="title-line"><h1>{isIdeas ? '想法' : isDeadlines ? 'DDL' : isHabits ? '习惯/计划' : isReviews ? '复盘' : '待办'}</h1><span className="active-count">{isHabits ? (activeHabit ? 1 : 0) : isReviews ? reviewCount : isNotebook ? noteTasks.length : active.length}</span></div>
             <div className="header-meta">
-              {isIdeas ? <span className="mode-label">随手记录</span> : isDeadlines ? <span className="mode-label">按截止日期排序</span> : isHabits ? <span className="mode-label">一次专注一个</span> : isReviews ? <span className="mode-label">问题变成行动</span> : <time dateTime={selectedDate}>{selectedDate}</time>}
-              <span className="version-label">v7.9.0 · Sync</span>
+              {isIdeas ? <span className="mode-label">{isNotebook ? '轻量笔记本' : '随手记录'}</span> : isDeadlines ? <span className="mode-label">按截止日期排序</span> : isHabits ? <span className="mode-label">一次专注一个</span> : isReviews ? <span className="mode-label">问题变成行动</span> : <time dateTime={selectedDate}>{selectedDate}</time>}
+              <span className="version-label">v7.10.0 · Sync</span>
               <button type="button" className={`cloud-status-button is-${cloud.status}`} aria-expanded={syncPanelOpen} onClick={() => setSyncPanelOpen((value) => !value)}>{cloudIcon()}<span>{cloud.session ? '已连接' : '云同步'}</span></button>
             </div>
           </header>
@@ -552,26 +634,32 @@ export function App() {
             <button type="button" className={selectedDay === 'tomorrow' ? 'is-selected' : ''} aria-pressed={selectedDay === 'tomorrow'} onClick={() => selectList('tomorrow')}>明天</button>
             <button type="button" className={isIdeas ? 'is-selected' : ''} aria-pressed={isIdeas} onClick={() => selectList('ideas')}>想法</button>
             <button type="button" className={isDeadlines ? 'is-selected' : ''} aria-pressed={isDeadlines} onClick={() => selectList('deadlines')}>DDL</button>
-            <button type="button" className={isHabits ? 'is-selected' : ''} aria-pressed={isHabits} onClick={() => selectList('habits')}>习惯</button>
+            <button type="button" className={`habit-tab ${isHabits ? 'is-selected' : ''}`} aria-pressed={isHabits} onClick={() => selectList('habits')}>习惯/计划</button>
             <button type="button" className={isReviews ? 'is-selected' : ''} aria-pressed={isReviews} onClick={() => selectList('reviews')}>复盘</button>
           </nav>
 
           {isIdeas && (
-            <nav className="idea-filter" aria-label="想法分类">
-              <button type="button" className={ideaFilter === IDEA_FILTER_ALL ? 'is-selected' : ''} aria-pressed={ideaFilter === IDEA_FILTER_ALL} onClick={() => setIdeaFilter(IDEA_FILTER_ALL)}>全部</button>
-              <button type="button" className={ideaFilter === IDEA_TAG_GOAL ? 'is-selected' : ''} aria-pressed={ideaFilter === IDEA_TAG_GOAL} onClick={() => setIdeaFilter(IDEA_TAG_GOAL)}>符合当下目标</button>
-              <button type="button" className={ideaFilter === IDEA_TAG_INTEREST ? 'is-selected' : ''} aria-pressed={ideaFilter === IDEA_TAG_INTEREST} onClick={() => setIdeaFilter(IDEA_TAG_INTEREST)}>感兴趣</button>
-            </nav>
+            <>
+              <nav className="idea-mode-switch" aria-label="想法内容类型">
+                <button type="button" className={ideaMode === 'ideas' ? 'is-selected' : ''} aria-pressed={ideaMode === 'ideas'} onClick={() => switchIdeaMode('ideas')}>想法</button>
+                <button type="button" className={ideaMode === 'notes' ? 'is-selected' : ''} aria-pressed={ideaMode === 'notes'} onClick={() => switchIdeaMode('notes')}>笔记</button>
+              </nav>
+              {!isNotebook && <nav className="idea-filter" aria-label="想法分类">
+                <button type="button" className={ideaFilter === IDEA_FILTER_ALL ? 'is-selected' : ''} aria-pressed={ideaFilter === IDEA_FILTER_ALL} onClick={() => setIdeaFilter(IDEA_FILTER_ALL)}>全部</button>
+                <button type="button" className={ideaFilter === IDEA_TAG_GOAL ? 'is-selected' : ''} aria-pressed={ideaFilter === IDEA_TAG_GOAL} onClick={() => setIdeaFilter(IDEA_TAG_GOAL)}>符合当下目标</button>
+                <button type="button" className={ideaFilter === IDEA_TAG_INTEREST ? 'is-selected' : ''} aria-pressed={ideaFilter === IDEA_TAG_INTEREST} onClick={() => setIdeaFilter(IDEA_TAG_INTEREST)}>感兴趣</button>
+              </nav>}
+            </>
           )}
 
           {isHabits && (
             <div className="habit-dashboard">
               {activeHabit ? (
-                <section className="habit-focus-card" aria-label={`当前专注习惯：${activeHabit.title}`}>
+                <section className="habit-focus-card" aria-label={`当前专注的习惯/计划：${activeHabit.title}`}>
                   <div className="habit-focus-top">
                     <span className="habit-focus-icon"><Target size={22} weight="duotone" /></span>
-                    <span className="habit-focus-copy"><small>当前专注</small><strong>{activeHabit.title}</strong><span>{activeHabit.habitMinimum}</span></span>
-                    <button className="habit-icon-button" type="button" aria-label={`编辑习惯：${activeHabit.title}`} title="编辑" onClick={() => editHabit(activeHabit)}><PencilSimple size={16} /></button>
+                    <span className="habit-focus-copy"><small>当前专注</small><strong>{activeHabit.title}</strong><span>{habitMinimumLabel(activeHabit.habitMinimum)}</span></span>
+                    <button className="habit-icon-button" type="button" aria-label={`编辑习惯/计划：${activeHabit.title}`} title="编辑" onClick={() => editHabit(activeHabit)}><PencilSimple size={16} /></button>
                   </div>
                   <div className="habit-cycle-row"><span>第 {activeHabitProgress.cycleDay} / {activeHabitProgress.durationDays} 天</span><span>至 {activeHabitProgress.endDate}</span></div>
                   <div className="habit-progress-track" aria-label={`周期进度 ${activeHabitProgress.progressPercent}%`}><span style={{ width: `${activeHabitProgress.progressPercent}%` }} /></div>
@@ -588,29 +676,32 @@ export function App() {
                   {confirmAction?.type === 'end-habit' && confirmAction.id === activeHabit.id ? <div className="inline-confirm habit-end-confirm"><span>确定结束当前周期？记录会保留。</span><button type="button" onClick={() => setConfirmAction(null)}>取消</button><button className="is-danger" type="button" onClick={() => endHabit(activeHabit.id)}>结束</button></div> : <button className="habit-end-button" type="button" onClick={() => setConfirmAction({ type: 'end-habit', id: activeHabit.id })}>结束本周期</button>}
                 </section>
               ) : (
-                <section className="habit-empty-focus"><Target size={25} weight="duotone" /><span><strong>还没有正在培养的习惯</strong><small>从候选习惯中选择一个，开始阶段性专注。</small></span></section>
+                <section className="habit-empty-focus"><Target size={25} weight="duotone" /><span><strong>还没有正在执行的习惯/计划</strong><small>从候选习惯/计划中选择一个，开始阶段性专注。</small></span></section>
               )}
 
               <form className="habit-form" onSubmit={saveHabit}>
-                <div className="habit-form-heading"><strong>{editingHabitId ? '编辑习惯' : '添加候选习惯'}</strong>{editingHabitId && <button type="button" onClick={resetHabitForm}>取消</button>}</div>
-                <input aria-label="习惯名称" value={habitName} onChange={(event) => setHabitName(event.target.value)} placeholder="例如：阅读" />
-                <input aria-label="习惯最低完成标准" value={habitMinimum} onChange={(event) => setHabitMinimum(event.target.value)} placeholder="最低标准，例如阅读 20 分钟" />
+                <div className="habit-form-heading"><strong>{editingHabitId ? '编辑习惯/计划' : '添加候选习惯/计划'}</strong>{editingHabitId && <button type="button" onClick={resetHabitForm}>取消</button>}</div>
+                <input aria-label="习惯/计划名称" value={habitName} onChange={(event) => setHabitName(event.target.value)} placeholder="例如：阅读或完成作品集" />
+                <div className="habit-minimum-row">
+                  <input type={habitMinimumUnit === HABIT_MINIMUM_UNIT_CUSTOM ? 'text' : 'number'} min={habitMinimumUnit === HABIT_MINIMUM_UNIT_CUSTOM ? undefined : '0.1'} step={habitMinimumUnit === HABIT_MINIMUM_UNIT_CUSTOM ? undefined : '0.1'} aria-label="习惯/计划最低完成标准" value={habitMinimum} onChange={(event) => setHabitMinimum(event.target.value)} placeholder={habitMinimumUnit === HABIT_MINIMUM_UNIT_CUSTOM ? '例如：完成一章' : '例如：25'} />
+                  <label><span>单位</span><select aria-label="选择最低完成标准单位" value={habitMinimumUnit} onChange={(event) => setHabitMinimumUnit(event.target.value)}><option value={HABIT_MINIMUM_UNIT_MINUTES}>分钟</option><option value={HABIT_MINIMUM_UNIT_HOURS}>小时</option><option value={HABIT_MINIMUM_UNIT_CUSTOM}>自定义</option></select></label>
+                </div>
                 <div className="habit-form-options">
-                  <label><span>培养周期</span><select aria-label="选择习惯培养周期" value={habitDuration} onChange={(event) => setHabitDuration(event.target.value)}><option value="30">30 天</option><option value="45">45 天</option><option value="60">60 天</option></select></label>
+                  <label><span>执行周期</span><select aria-label="选择习惯/计划执行周期" value={habitDuration} onChange={(event) => setHabitDuration(event.target.value)}><option value="30">30 天</option><option value="45">45 天</option><option value="60">60 天</option></select></label>
                   <label><span>每周目标</span><select aria-label="选择每周目标次数" value={habitWeeklyTarget} onChange={(event) => setHabitWeeklyTarget(event.target.value)}>{Array.from({ length: 7 }, (_, index) => <option value={index + 1} key={index + 1}>{index + 1} 次</option>)}</select></label>
-                  <button type="submit" disabled={!habitName.trim() || !habitMinimum.trim()}>{editingHabitId ? '保存' : '添加'}</button>
+                  <button type="submit" disabled={!habitName.trim() || !formatHabitMinimum(habitMinimum, habitMinimumUnit)}>{editingHabitId ? '保存' : '添加'}</button>
                 </div>
               </form>
 
               <section className="habit-pool">
-                <div className="habit-section-title"><strong>候选习惯</strong><span>{candidateHabits.length}</span></div>
-                {candidateHabits.length === 0 ? <p className="habit-list-empty">先记下一个想培养的习惯</p> : candidateHabits.map((habit) => (
+                <div className="habit-section-title"><strong>候选习惯/计划</strong><span>{candidateHabits.length}</span></div>
+                {candidateHabits.length === 0 ? <p className="habit-list-empty">先记下一个想坚持的习惯/计划</p> : candidateHabits.map((habit) => (
                   <div className="habit-pool-row" key={habit.id}>
-                    <span><strong>{habit.title}</strong><small>{habit.habitDurationDays} 天 · 每周 {habit.habitWeeklyTarget} 次 · {habit.habitMinimum}</small></span>
+                    <span><strong>{habit.title}</strong><small>{habit.habitDurationDays} 天 · 每周 {habit.habitWeeklyTarget} 次 · {habitMinimumLabel(habit.habitMinimum)}</small></span>
                     {confirmAction?.type === 'delete-habit' && confirmAction.id === habit.id ? <span className="inline-confirm is-compact"><span>确定删除？</span><button type="button" onClick={() => setConfirmAction(null)}>取消</button><button className="is-danger" type="button" onClick={() => deleteHabit(habit.id)}>删除</button></span> : <span className="habit-pool-actions">
-                      <button className="habit-start-button" type="button" disabled={Boolean(activeHabit)} title={activeHabit ? '请先结束当前周期' : '开始培养'} onClick={() => beginHabit(habit.id)}><Play size={14} weight="fill" />开始</button>
-                      <button className="habit-icon-button" type="button" aria-label={`编辑习惯：${habit.title}`} onClick={() => editHabit(habit)}><PencilSimple size={15} /></button>
-                      <button className="habit-icon-button is-danger" type="button" aria-label={`删除习惯：${habit.title}`} onClick={() => setConfirmAction({ type: 'delete-habit', id: habit.id })}><Trash size={15} /></button>
+                      <button className="habit-start-button" type="button" disabled={Boolean(activeHabit)} title={activeHabit ? '请先结束当前周期' : '开始执行'} onClick={() => beginHabit(habit.id)}><Play size={14} weight="fill" />开始</button>
+                      <button className="habit-icon-button" type="button" aria-label={`编辑习惯/计划：${habit.title}`} onClick={() => editHabit(habit)}><PencilSimple size={15} /></button>
+                      <button className="habit-icon-button is-danger" type="button" aria-label={`删除习惯/计划：${habit.title}`} onClick={() => setConfirmAction({ type: 'delete-habit', id: habit.id })}><Trash size={15} /></button>
                     </span>}
                   </div>
                 ))}
@@ -674,7 +765,7 @@ export function App() {
                           <button type="button" onClick={() => editReview(review)}><PencilSimple size={14} />复盘</button>
                           {review.reviewAction && <>
                             <button type="button" disabled={linkedToday} onClick={() => reviewActionToToday(review.id)}>{linkedToday ? '已加入今天' : '加入今天'}</button>
-                            <button type="button" disabled={linkedHabit} onClick={() => reviewActionToHabit(review.id)}>{linkedHabit ? '已转习惯' : '培养为习惯'}<ArrowRight size={13} /></button>
+                            <button type="button" disabled={linkedHabit} onClick={() => reviewActionToHabit(review.id)}>{linkedHabit ? '已转习惯/计划' : '转为习惯/计划'}<ArrowRight size={13} /></button>
                           </>}
                         </div>
                       </>
@@ -685,7 +776,59 @@ export function App() {
             </div>
           )}
 
-          {!isHabits && !isReviews && <>
+          {isNotebook && (
+            <div className="note-dashboard">
+              <div className="note-toolbar">
+                <label className="note-search">
+                  <MagnifyingGlass size={16} aria-hidden="true" />
+                  <input aria-label="搜索笔记" value={noteQuery} onChange={(event) => setNoteQuery(event.target.value)} placeholder="搜索标题或正文" />
+                </label>
+                <button className="note-new-button" type="button" onClick={beginNewNote}><NotePencil size={16} weight="bold" />新建笔记</button>
+              </div>
+
+              {noteDraft ? (
+                <section className="note-editor" aria-label="笔记编辑器">
+                  <div className="note-editor-top">
+                    <span>{noteDraft.noteContent.trim() ? '正在自动保存' : '输入正文后自动保存'}</span>
+                    <span className="note-editor-actions">
+                      <button type="button" className={noteDraft.notePinned ? 'is-pinned' : ''} aria-label={noteDraft.notePinned ? '取消置顶笔记' : '置顶笔记'} title={noteDraft.notePinned ? '取消置顶' : '置顶'} onClick={() => pinNote(noteDraft.id)}><PushPin size={15} weight={noteDraft.notePinned ? 'fill' : 'regular'} /></button>
+                      <button type="button" onClick={() => setNoteDraft(null)}>完成</button>
+                    </span>
+                  </div>
+                  <input className="note-title-input" aria-label="笔记标题（可选）" value={noteDraft.title || ''} onChange={(event) => updateNoteDraft('title', event.target.value)} placeholder="标题（可选）" />
+                  <textarea aria-label="笔记正文" value={noteDraft.noteContent || ''} onChange={(event) => updateNoteDraft('noteContent', event.target.value)} placeholder="把杂七杂八的想法先记下来……" rows="9" autoFocus />
+                  <small className="note-save-status">{noteDraft.noteContent.trim() ? `已自动保存 · ${formatNoteTime(noteDraft.noteUpdatedAt)}` : '正文为空时不会创建空白笔记'}</small>
+                </section>
+              ) : (
+                <div className="note-list" aria-live="polite">
+                  {noteItems.length === 0 && <p className="note-empty">{noteQuery.trim() ? '没有找到相关笔记' : '还没有笔记，先把脑海里的内容记下来'}</p>}
+                  {noteItems.map((note) => {
+                    const linkedIdea = tasks.some((task) => task.sourceNoteId === note.id && task.bucket === IDEA_BUCKET)
+                    const linkedToday = tasks.some((task) => task.sourceNoteId === note.id && task.date === today && !task.completed)
+                    return <article className={`note-card ${note.notePinned ? 'is-pinned' : ''}`} key={note.id}>
+                      <button className="note-open-button" type="button" onClick={() => editNote(note)}>
+                        <span className="note-card-heading"><strong>{noteDisplayTitle(note)}</strong>{note.notePinned && <PushPin size={13} weight="fill" aria-label="已置顶" />}</span>
+                        <span className="note-card-excerpt">{note.noteContent}</span>
+                        <small>{formatNoteTime(note.noteUpdatedAt || note.noteCreatedAt)}</small>
+                      </button>
+                      {confirmAction?.type === 'delete-note' && confirmAction.id === note.id ? (
+                        <div className="inline-confirm note-delete-confirm"><span>确定删除这条笔记？</span><button type="button" onClick={() => setConfirmAction(null)}>取消</button><button className="is-danger" type="button" onClick={() => deleteNote(note.id)}>删除</button></div>
+                      ) : (
+                        <div className="note-card-actions">
+                          <button type="button" className={note.notePinned ? 'is-pinned' : ''} onClick={() => pinNote(note.id)}><PushPin size={14} weight={note.notePinned ? 'fill' : 'regular'} />{note.notePinned ? '取消置顶' : '置顶'}</button>
+                          <button type="button" disabled={linkedIdea} onClick={() => noteToIdeas(note.id)}>{linkedIdea ? '已转想法' : '转为想法'}</button>
+                          <button type="button" disabled={linkedToday} onClick={() => noteToToday(note.id)}>{linkedToday ? '已加入今天' : '加入今天'}</button>
+                          <button className="is-danger" type="button" aria-label={`删除笔记：${noteDisplayTitle(note)}`} onClick={() => setConfirmAction({ type: 'delete-note', id: note.id })}><Trash size={14} /></button>
+                        </div>
+                      )}
+                    </article>
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+
+          {!isHabits && !isReviews && !isNotebook && <>
           <form className={isDeadlines ? 'deadline-add' : 'quick-add'} onSubmit={addTask}>
             <input className="task-draft-input" aria-label={isIdeas ? '输入新的想法' : isDeadlines ? '输入新的 DDL' : `输入${selectedDay === 'today' ? '今天' : '明天'}的新任务`} value={draft} onChange={(event) => setDraft(event.target.value)} placeholder={isIdeas ? '记下突然想到的事，回车添加' : isDeadlines ? '输入有截止日期的事项' : `输入${selectedDay === 'today' ? '今天' : '明天'}的任务，回车添加`} autoFocus={!isDesktop} />
             {isDeadlines && <span className="deadline-add-controls">
@@ -704,7 +847,7 @@ export function App() {
                   <span className="task-title">{task.title}</span>
                   {selectedDay === 'today' && task.carryoverCount && <span className="task-carryover-label"><ArrowRight size={13} weight="bold" />{carryoverLabel(task)}</span>}
                   {isDeadlines && (() => { const status = deadlineStatus(task); return <span className="deadline-meta"><span className="deadline-date"><CalendarBlank size={13} weight="fill" />{task.deadlineDate}{task.deadlineTime ? ` · ${task.deadlineTime}` : ''}</span><span className={`deadline-status is-${status.key}`}>{status.label}</span></span> })()}
-                  {selectedDay === 'today' && task.bucket === HABIT_BUCKET && <span className="task-habit-label"><Target size={13} weight="fill" />习惯 · {task.habitMinimum}</span>}
+                  {selectedDay === 'today' && task.bucket === HABIT_BUCKET && <span className="task-habit-label"><Target size={13} weight="fill" />习惯/计划 · {habitMinimumLabel(task.habitMinimum)}</span>}
                   {selectedDay === 'today' && task.reminderTime && <span className="task-reminder-label"><Clock size={13} weight="fill" />今天 {task.reminderTime}</span>}
                   {selectedDay === 'today' && editingReminderId === task.id && (
                     <span className="task-reminder-editor">

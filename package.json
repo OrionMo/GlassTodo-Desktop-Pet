@@ -1,6 +1,6 @@
 {
   "name": "glasstodo",
-  "version": "7.9.0",
+  "version": "7.10.0",
   "private": true,
   "type": "module",
   "main": "electron/main.cjs",
@@ -10,6 +10,7 @@
     "desktop": "npm run build && electron electron/main.cjs",
     "dist:win": "npm run build && electron-builder --win portable",
     "preview": "vite preview",
+    "test:drag": "node --test tests/drag-geometry.test.cjs",
     "test:sites": "node --test tests/sites-worker.test.mjs"
   },
   "dependencies": {
