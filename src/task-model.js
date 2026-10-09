@@ -246,6 +246,31 @@ export function normalizeDeadlineDate(value) {
   return candidate.getFullYear() === year && candidate.getMonth() === month - 1 && candidate.getDate() === day ? normalized : null
 }
 
+export function updateTaskDetails(tasks, id, draft) {
+  if (!Array.isArray(tasks)) return []
+  const task = tasks.find((item) => item?.id === id)
+  const title = typeof draft?.title === 'string' ? draft.title.trim() : ''
+  if (!task || !title) return tasks
+
+  let deadlineDate = null
+  let deadlineTime = null
+  if (task.bucket === DEADLINE_BUCKET) {
+    deadlineDate = normalizeDeadlineDate(draft.deadlineDate)
+    const rawDeadlineTime = typeof draft.deadlineTime === 'string' ? draft.deadlineTime.trim() : ''
+    deadlineTime = normalizeReminderTime(rawDeadlineTime)
+    if (!deadlineDate || (rawDeadlineTime && !deadlineTime)) return tasks
+  }
+
+  return tasks.map((item) => {
+    if (item?.id !== id) return item
+    if (item.bucket !== DEADLINE_BUCKET) return { ...item, title }
+    const next = { ...item, title, deadlineDate }
+    if (deadlineTime) next.deadlineTime = deadlineTime
+    else delete next.deadlineTime
+    return next
+  })
+}
+
 export function deadlineStatus(task, now = new Date()) {
   const deadlineDate = normalizeDeadlineDate(task?.deadlineDate)
   if (!deadlineDate || !(now instanceof Date) || Number.isNaN(now.getTime())) return { key: 'unknown', label: '未设置日期', days: null }

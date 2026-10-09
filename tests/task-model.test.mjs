@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { DEADLINE_BUCKET, HABIT_BUCKET, HABIT_MINIMUM_UNIT_CUSTOM, HABIT_MINIMUM_UNIT_HOURS, HABIT_MINIMUM_UNIT_MINUTES, HABIT_STATE_ACTIVE, HABIT_STATE_CANDIDATE, HABIT_STATE_FINISHED, IDEA_BUCKET, IDEA_FILTER_ALL, IDEA_TAG_GOAL, IDEA_TAG_INTEREST, NOTE_BUCKET, REVIEW_BUCKET, REVIEW_CATEGORY_OTHER, REVIEW_CATEGORY_PROCESS, REVIEW_FILTER_ALL, REVIEW_STATUS_IMPROVED, REVIEW_STATUS_PENDING, REVIEW_STATUS_VERIFY, addNoteToIdeas, addNoteToToday, addReviewActionToHabits, addReviewActionToToday, carryOverUnfinishedTasks, carryoverLabel, compareDeadlineTasks, compareNotes, compareTaskImportance, deadlineStatus, findDueTaskReminders, finishHabitCycle, formatHabitMinimum, habitMinimumLabel, habitProgress, ideaMatchesFilter, incrementReviewOccurrence, markTaskReminderFired, migrateTasks, moveDeadlineToToday, moveHabitToToday, normalizeDeadlineDate, normalizeHabitDuration, normalizeHabitWeeklyTarget, normalizeReminderTime, normalizeReviewCategory, normalizeReviewStatus, noteDisplayTitle, noteMatchesQuery, parseHabitMinimum, recordHabitCheckIn, recordHabitRest, reminderOccurrenceKey, reviewMatchesFilter, setTaskReminder, startHabitCycle, toggleNotePinned, toggleTaskImportance, upsertNote } from '../src/task-model.js'
+import { DEADLINE_BUCKET, HABIT_BUCKET, HABIT_MINIMUM_UNIT_CUSTOM, HABIT_MINIMUM_UNIT_HOURS, HABIT_MINIMUM_UNIT_MINUTES, HABIT_STATE_ACTIVE, HABIT_STATE_CANDIDATE, HABIT_STATE_FINISHED, IDEA_BUCKET, IDEA_FILTER_ALL, IDEA_TAG_GOAL, IDEA_TAG_INTEREST, NOTE_BUCKET, REVIEW_BUCKET, REVIEW_CATEGORY_OTHER, REVIEW_CATEGORY_PROCESS, REVIEW_FILTER_ALL, REVIEW_STATUS_IMPROVED, REVIEW_STATUS_PENDING, REVIEW_STATUS_VERIFY, addNoteToIdeas, addNoteToToday, addReviewActionToHabits, addReviewActionToToday, carryOverUnfinishedTasks, carryoverLabel, compareDeadlineTasks, compareNotes, compareTaskImportance, deadlineStatus, findDueTaskReminders, finishHabitCycle, formatHabitMinimum, habitMinimumLabel, habitProgress, ideaMatchesFilter, incrementReviewOccurrence, markTaskReminderFired, migrateTasks, moveDeadlineToToday, moveHabitToToday, normalizeDeadlineDate, normalizeHabitDuration, normalizeHabitWeeklyTarget, normalizeReminderTime, normalizeReviewCategory, normalizeReviewStatus, noteDisplayTitle, noteMatchesQuery, parseHabitMinimum, recordHabitCheckIn, recordHabitRest, reminderOccurrenceKey, reviewMatchesFilter, setTaskReminder, startHabitCycle, toggleNotePinned, toggleTaskImportance, updateTaskDetails, upsertNote } from '../src/task-model.js'
 
 test('migrates legacy unfinished records into untagged ideas without changing identity or status', () => {
   const source = [{ id: 'legacy-1', title: '旧未完成事项', completed: true, date: '2026-09-17', bucket: 'unfinished' }]
@@ -181,6 +181,39 @@ test('sorts deadlines chronologically and joins today without duplicating the ta
   assert.equal(joined.length, 2)
   assert.equal(joined[1].date, '2026-09-23')
   assert.equal(joined[1].bucket, DEADLINE_BUCKET)
+})
+
+test('edits an ordinary task title without changing completion or metadata', () => {
+  const source = [{
+    id: 'today-1',
+    title: '旧标题',
+    completed: true,
+    date: '2026-10-08',
+    important: true,
+    reminderTime: '16:00',
+    carriedFromDate: '2026-10-07',
+    carryoverCount: 1,
+  }]
+  const [updated] = updateTaskDetails(source, 'today-1', { title: '  新标题  ' })
+  assert.deepEqual(updated, { ...source[0], title: '新标题' })
+})
+
+test('edits deadline fields while preserving completion state and clears optional time', () => {
+  const source = [{ id: 'ddl-1', title: '旧 DDL', completed: true, bucket: DEADLINE_BUCKET, deadlineDate: '2026-10-10', deadlineTime: '09:00', extra: 'keep' }]
+  const changed = updateTaskDetails(source, 'ddl-1', { title: '新 DDL', deadlineDate: '2026-10-12', deadlineTime: '18:30' })
+  assert.deepEqual(changed[0], { ...source[0], title: '新 DDL', deadlineDate: '2026-10-12', deadlineTime: '18:30' })
+  const cleared = updateTaskDetails(changed, 'ddl-1', { title: '新 DDL', deadlineDate: '2026-10-12', deadlineTime: '' })
+  assert.equal(cleared[0].deadlineTime, undefined)
+  assert.equal(cleared[0].completed, true)
+  assert.equal(cleared[0].extra, 'keep')
+})
+
+test('edits an idea title without changing its tags and rejects invalid drafts', () => {
+  const source = [{ id: 'idea-1', title: '旧想法', completed: false, bucket: IDEA_BUCKET, ideaTags: [IDEA_TAG_GOAL, IDEA_TAG_INTEREST] }]
+  const updated = updateTaskDetails(source, 'idea-1', { title: '新想法' })
+  assert.deepEqual(updated[0].ideaTags, source[0].ideaTags)
+  assert.equal(updateTaskDetails(updated, 'idea-1', { title: '   ' }), updated)
+  assert.equal(updateTaskDetails([{ ...source[0], bucket: DEADLINE_BUCKET, deadlineDate: '2026-10-10' }], 'idea-1', { title: '无效日期', deadlineDate: '2026-02-30' })[0].title, '旧想法')
 })
 
 test('normalizes habit cycle settings to the supported range', () => {
