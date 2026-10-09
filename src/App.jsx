@@ -652,7 +652,7 @@ export function App() {
             <div className="title-line"><h1>{isIdeas ? '想法' : isDeadlines ? 'DDL' : isHabits ? '习惯/计划' : isReviews ? '复盘' : '待办'}</h1><span className="active-count">{isHabits ? (activeHabit ? 1 : 0) : isReviews ? reviewCount : isNotebook ? noteTasks.length : active.length}</span></div>
             <div className="header-meta">
               {isIdeas ? <span className="mode-label">{isNotebook ? '轻量笔记本' : '随手记录'}</span> : isDeadlines ? <span className="mode-label">按截止日期排序</span> : isHabits ? <span className="mode-label">一次专注一个</span> : isReviews ? <span className="mode-label">问题变成行动</span> : <time dateTime={selectedDate}>{selectedDate}</time>}
-              <span className="version-label">v7.10.0 · Sync</span>
+              <span className="version-label">v7.11.0 · Sync</span>
               <button type="button" className={`cloud-status-button is-${cloud.status}`} aria-expanded={syncPanelOpen} onClick={() => setSyncPanelOpen((value) => !value)}>{cloudIcon()}<span>{cloud.session ? '已连接' : '云同步'}</span></button>
             </div>
           </header>
