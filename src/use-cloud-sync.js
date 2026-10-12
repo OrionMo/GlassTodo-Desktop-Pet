@@ -4,6 +4,7 @@ import { authoritativeRows, captureLocalChanges, clearPending, mergeRemoteRows, 
 
 const SYNC_STATE_PREFIX = 'glass-todo.cloud-sync.v1.'
 const BACKUP_PREFIX = 'glass-todo.pre-cloud-backup.'
+const DESKTOP_RECOVERY_KEY_PREFIX = 'glass-todo.desktop-recovery.v7.12.1.'
 const SYNC_INTERVAL_MS = 30 * 1000
 
 function readState(userId) {
@@ -41,6 +42,7 @@ export function useCloudSync(tasks, setTasks) {
   const [session, setSession] = useState(null)
   const [status, setStatus] = useState(cloudConfigured ? 'idle' : 'unconfigured')
   const [message, setMessage] = useState(cloudConfigured ? '尚未登录' : '云同步尚未配置')
+  const [recoveryRequired, setRecoveryRequired] = useState(false)
 
   useEffect(() => { tasksRef.current = tasks }, [tasks])
 
@@ -114,6 +116,8 @@ export function useCloudSync(tasks, setTasks) {
       tasksRef.current = prepared.tasks
       if (!sameTasks(snapshot, prepared.tasks)) setTasks(prepared.tasks)
       initializedRef.current = true
+      localStorage.setItem(`${DESKTOP_RECOVERY_KEY_PREFIX}${user.id}`, 'complete')
+      setRecoveryRequired(false)
       setStatus('synced')
       setMessage('已备份并用本机数据更新云端')
       return true
@@ -142,6 +146,8 @@ export function useCloudSync(tasks, setTasks) {
       tasksRef.current = prepared.tasks
       if (!sameTasks(previousTasks, prepared.tasks)) setTasks(prepared.tasks)
       initializedRef.current = true
+      localStorage.setItem(`${DESKTOP_RECOVERY_KEY_PREFIX}${user.id}`, 'complete')
+      setRecoveryRequired(false)
       setStatus('synced')
       setMessage('已备份本机并重新下载云端数据')
       return true
@@ -159,6 +165,16 @@ export function useCloudSync(tasks, setTasks) {
     setStatus('syncing')
     setMessage('正在安全合并本机与云端数据…')
     try {
+      const desktopRecoveryKey = `${DESKTOP_RECOVERY_KEY_PREFIX}${user.id}`
+      if (window.desktopAPI && !localStorage.getItem(desktopRecoveryKey)) {
+        backupLocalTasks(tasksRef.current)
+        stateRef.current = readState(user.id)
+        setRecoveryRequired(true)
+        setStatus('idle')
+        setMessage(`检测到本机 ${tasksRef.current.length} 条数据，请先选择恢复方向`)
+        return
+      }
+      setRecoveryRequired(false)
       const remoteRows = await fetchRemoteRows(user.id)
       if (!hasSavedState(user.id)) {
         backupLocalTasks(tasksRef.current)
@@ -271,5 +287,5 @@ export function useCloudSync(tasks, setTasks) {
     setMessage('已退出，当前设备仍保留本地数据')
   }, [syncNow])
 
-  return { configured: cloudConfigured, session, status, message, signIn, signUp, signOut, syncNow, replaceCloudWithLocal, replaceLocalWithCloud }
+  return { configured: cloudConfigured, session, status, message, recoveryRequired, signIn, signUp, signOut, syncNow, replaceCloudWithLocal, replaceLocalWithCloud }
 }

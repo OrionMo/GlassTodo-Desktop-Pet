@@ -76,3 +76,11 @@ test('uses in-app confirmation controls instead of blocking native dialogs', () 
   assert.match(app, /review-delete-confirm/)
   assert.match(app, /habit-end-confirm/)
 })
+
+test('pauses first desktop sync until the user chooses a recovery direction', () => {
+  const hook = fs.readFileSync(path.join(__dirname, '..', 'src', 'use-cloud-sync.js'), 'utf8')
+  assert.match(hook, /DESKTOP_RECOVERY_KEY_PREFIX/)
+  assert.match(hook, /window\.desktopAPI && !localStorage\.getItem\(desktopRecoveryKey\)/)
+  assert.match(hook, /setRecoveryRequired\(true\)/)
+  assert.match(hook, /检测到本机.*选择恢复方向/)
+})
