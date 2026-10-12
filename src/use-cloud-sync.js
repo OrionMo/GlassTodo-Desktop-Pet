@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { cloudClient, cloudConfigured } from './cloud-client.js'
-import { captureLocalChanges, clearPending, mergeRemoteRows, normalizeSyncState, pendingRows, prepareInitialMerge } from './sync-model.js'
+import { authoritativeRows, captureLocalChanges, clearPending, mergeRemoteRows, normalizeSyncState, pendingRows, prepareInitialMerge } from './sync-model.js'
 
 const SYNC_STATE_PREFIX = 'glass-todo.cloud-sync.v1.'
 const BACKUP_PREFIX = 'glass-todo.pre-cloud-backup.'
@@ -91,6 +91,68 @@ export function useCloudSync(tasks, setTasks) {
       syncingRef.current = false
     }
   }, [fetchRemoteRows, flushPending, session, setTasks])
+
+  const replaceCloudWithLocal = useCallback(async () => {
+    const user = session?.user
+    if (!cloudClient || !user || syncingRef.current) return false
+    syncingRef.current = true
+    setStatus('syncing')
+    setMessage('正在备份并用本机数据更新云端…')
+    try {
+      const snapshot = tasksRef.current
+      backupLocalTasks(snapshot)
+      const remoteRows = await fetchRemoteRows(user.id)
+      const rows = authoritativeRows(snapshot, remoteRows, user.id)
+      if (rows.length > 0) {
+        const { error } = await cloudClient.from('todo_items').upsert(rows, { onConflict: 'user_id,id' })
+        if (error) throw error
+      }
+      const verifiedRows = await fetchRemoteRows(user.id)
+      const prepared = prepareInitialMerge(snapshot, verifiedRows, user.id)
+      stateRef.current = prepared.state
+      writeState(stateRef.current)
+      tasksRef.current = prepared.tasks
+      if (!sameTasks(snapshot, prepared.tasks)) setTasks(prepared.tasks)
+      initializedRef.current = true
+      setStatus('synced')
+      setMessage('已备份并用本机数据更新云端')
+      return true
+    } catch (error) {
+      setStatus(navigator.onLine ? 'error' : 'offline')
+      setMessage(navigator.onLine ? `恢复失败：${error.message}` : '离线状态下无法更新云端')
+      return false
+    } finally {
+      syncingRef.current = false
+    }
+  }, [fetchRemoteRows, session, setTasks])
+
+  const replaceLocalWithCloud = useCallback(async () => {
+    const user = session?.user
+    if (!cloudClient || !user || syncingRef.current) return false
+    syncingRef.current = true
+    setStatus('syncing')
+    setMessage('正在备份并重新下载云端数据…')
+    try {
+      backupLocalTasks(tasksRef.current)
+      const remoteRows = await fetchRemoteRows(user.id)
+      const prepared = prepareInitialMerge([], remoteRows, user.id)
+      const previousTasks = tasksRef.current
+      stateRef.current = prepared.state
+      writeState(stateRef.current)
+      tasksRef.current = prepared.tasks
+      if (!sameTasks(previousTasks, prepared.tasks)) setTasks(prepared.tasks)
+      initializedRef.current = true
+      setStatus('synced')
+      setMessage('已备份本机并重新下载云端数据')
+      return true
+    } catch (error) {
+      setStatus(navigator.onLine ? 'error' : 'offline')
+      setMessage(navigator.onLine ? `恢复失败：${error.message}` : '离线状态下无法下载云端数据')
+      return false
+    } finally {
+      syncingRef.current = false
+    }
+  }, [fetchRemoteRows, session, setTasks])
 
   const initializeAccount = useCallback(async (user) => {
     initializedRef.current = false
@@ -209,5 +271,5 @@ export function useCloudSync(tasks, setTasks) {
     setMessage('已退出，当前设备仍保留本地数据')
   }, [syncNow])
 
-  return { configured: cloudConfigured, session, status, message, signIn, signUp, signOut, syncNow }
+  return { configured: cloudConfigured, session, status, message, signIn, signUp, signOut, syncNow, replaceCloudWithLocal, replaceLocalWithCloud }
 }

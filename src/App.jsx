@@ -652,7 +652,7 @@ export function App() {
             <div className="title-line"><h1>{isIdeas ? '想法' : isDeadlines ? 'DDL' : isHabits ? '习惯/计划' : isReviews ? '复盘' : '待办'}</h1><span className="active-count">{isHabits ? (activeHabit ? 1 : 0) : isReviews ? reviewCount : isNotebook ? noteTasks.length : active.length}</span></div>
             <div className="header-meta">
               {isIdeas ? <span className="mode-label">{isNotebook ? '轻量笔记本' : '随手记录'}</span> : isDeadlines ? <span className="mode-label">按截止日期排序</span> : isHabits ? <span className="mode-label">一次专注一个</span> : isReviews ? <span className="mode-label">问题变成行动</span> : <time dateTime={selectedDate}>{selectedDate}</time>}
-              <span className="version-label">v7.11.0 · Sync</span>
+              <span className="version-label">v7.12.0 · Sync</span>
               <button type="button" className={`cloud-status-button is-${cloud.status}`} aria-expanded={syncPanelOpen} onClick={() => setSyncPanelOpen((value) => !value)}>{cloudIcon()}<span>{cloud.session ? '已连接' : '云同步'}</span></button>
             </div>
           </header>
@@ -666,11 +666,24 @@ export function App() {
               {!cloud.configured ? (
                 <p className="cloud-config-hint">当前安装包还没有连接云端项目。配置后，本机数据会先备份，再与云端逐条合并。</p>
               ) : cloud.session ? (
-                <div className="cloud-account-row">
-                  <span><small>当前账号</small><strong>{cloud.session.user.email}</strong></span>
-                  <button type="button" disabled={cloud.status === 'syncing'} onClick={() => cloud.syncNow()}><ArrowClockwise size={14} />立即同步</button>
-                  <button type="button" className="cloud-signout" aria-label="退出云同步账号" title="退出账号" onClick={cloud.signOut}><SignOut size={14} /></button>
-                </div>
+                <>
+                  <div className="cloud-account-row">
+                    <span><small>当前账号</small><strong>{cloud.session.user.email}</strong></span>
+                    <button type="button" disabled={cloud.status === 'syncing'} onClick={() => cloud.syncNow()}><ArrowClockwise size={14} />立即同步</button>
+                    <button type="button" className="cloud-signout" aria-label="退出云同步账号" title="退出账号" onClick={cloud.signOut}><SignOut size={14} /></button>
+                  </div>
+                  <div className="cloud-recovery-row">
+                    <small>数据不一致时，选择正确的一端恢复；操作前会自动备份。</small>
+                    <span>
+                      <button type="button" disabled={cloud.status === 'syncing'} onClick={() => setConfirmAction({ type: 'cloud-push' })}>本机数据 → 云端</button>
+                      <button type="button" disabled={cloud.status === 'syncing'} onClick={() => setConfirmAction({ type: 'cloud-pull' })}>云端数据 → 本机</button>
+                    </span>
+                  </div>
+                  {(confirmAction?.type === 'cloud-push' || confirmAction?.type === 'cloud-pull') && <div className="cloud-recovery-confirm">
+                    <span>{confirmAction.type === 'cloud-push' ? `以这台设备的 ${tasks.length} 条数据为准更新云端？云端多出的旧记录会被移除。` : '放弃这台设备当前显示的数据，重新下载云端数据？'}</span>
+                    <span><button type="button" onClick={() => setConfirmAction(null)}>取消</button><button type="button" className="is-primary" onClick={() => { const action = confirmAction.type; setConfirmAction(null); if (action === 'cloud-push') cloud.replaceCloudWithLocal(); else cloud.replaceLocalWithCloud() }}>确认恢复</button></span>
+                  </div>}
+                </>
               ) : (
                 <form className="cloud-auth-form" onSubmit={submitAuth}>
                   <input type="email" autoComplete="email" aria-label="邮箱" placeholder="邮箱" value={authEmail} onChange={(event) => setAuthEmail(event.target.value)} />

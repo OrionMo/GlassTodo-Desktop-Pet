@@ -102,8 +102,6 @@ export function mergeRemoteRows(localTasks, currentState, remoteRows, now = new 
     const remoteUpdatedAt = validTimestamp(row.updated_at, now)
     const localPending = pending[id]
     if (localPending && Date.parse(localPending.updatedAt) > Date.parse(remoteUpdatedAt)) continue
-    const localRecord = records[id]
-    if (!localPending && localRecord && Date.parse(localRecord.updatedAt) > Date.parse(remoteUpdatedAt)) continue
 
     delete pending[id]
     if (row.deleted_at) {
@@ -121,6 +119,26 @@ export function mergeRemoteRows(localTasks, currentState, remoteRows, now = new 
     tasks: order.filter((id) => tasksById.has(id)).map((id) => tasksById.get(id)),
     state: { ...state, records, pending },
   }
+}
+
+export function authoritativeRows(localTasks, remoteRows, userId, now = new Date().toISOString()) {
+  const local = (Array.isArray(localTasks) ? localTasks : []).filter((task) => task?.id)
+  const localIds = new Set(local.map((task) => String(task.id)))
+  const rows = local.map((task) => ({
+    user_id: userId,
+    id: String(task.id),
+    task_data: task,
+    updated_at: now,
+    deleted_at: null,
+  }))
+
+  for (const row of Array.isArray(remoteRows) ? remoteRows : []) {
+    const id = String(row.id)
+    if (localIds.has(id)) continue
+    rows.push({ user_id: userId, id, task_data: null, updated_at: now, deleted_at: now })
+  }
+
+  return rows
 }
 
 export function pendingRows(state, userId) {

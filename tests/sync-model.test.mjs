@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { captureLocalChanges, clearPending, createSyncState, mergeRemoteRows, pendingRows, prepareInitialMerge } from '../src/sync-model.js'
+import { authoritativeRows, captureLocalChanges, clearPending, createSyncState, mergeRemoteRows, pendingRows, prepareInitialMerge } from '../src/sync-model.js'
 
 const NOW = '2026-09-28T10:00:00.000Z'
 
@@ -33,6 +33,26 @@ test('newer pending local edits are not overwritten by an older remote row', () 
   const result = mergeRemoteRows([{ id: 'a', title: '本机新标题' }], state, [{ id: 'a', task_data: { id: 'a', title: '云端旧标题' }, updated_at: NOW, deleted_at: null }])
   assert.equal(result.tasks[0].title, '本机新标题')
   assert.equal(result.state.pending.a.operation, 'upsert')
+})
+
+test('a stale clean device record never blocks the cloud copy', () => {
+  const state = createSyncState('user-1')
+  state.records.a = { hash: JSON.stringify({ id: 'a', title: '手机旧标题' }), updatedAt: '2026-09-28T11:00:00.000Z', deletedAt: null }
+  const result = mergeRemoteRows([{ id: 'a', title: '手机旧标题' }], state, [{ id: 'a', task_data: { id: 'a', title: '电脑新标题' }, updated_at: NOW, deleted_at: null }])
+  assert.equal(result.tasks[0].title, '电脑新标题')
+})
+
+test('authoritative upload includes local tasks and tombstones remote-only tasks', () => {
+  const rows = authoritativeRows(
+    [{ id: 'local', title: '电脑数据' }],
+    [{ id: 'local', task_data: { id: 'local', title: '旧数据' } }, { id: 'remote-only', task_data: { id: 'remote-only', title: '旧任务' } }],
+    'user-1',
+    NOW,
+  )
+  assert.deepEqual(rows, [
+    { user_id: 'user-1', id: 'local', task_data: { id: 'local', title: '电脑数据' }, updated_at: NOW, deleted_at: null },
+    { user_id: 'user-1', id: 'remote-only', task_data: null, updated_at: NOW, deleted_at: NOW },
+  ])
 })
 
 test('remote tombstones remove only the matching task', () => {
