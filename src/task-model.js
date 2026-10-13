@@ -168,6 +168,32 @@ export function reviewMatchesFilter(task, filter) {
   return filter === REVIEW_FILTER_ALL || normalizeReviewStatus(task.reviewStatus) === filter
 }
 
+export function reviewFeedbacks(review) {
+  if (!Array.isArray(review?.reviewFeedbacks)) return []
+  const seen = new Set()
+  return review.reviewFeedbacks
+    .filter((feedback) => feedback && typeof feedback === 'object')
+    .map((feedback) => ({
+      id: typeof feedback.id === 'string' ? feedback.id.trim() : '',
+      text: typeof feedback.text === 'string' ? feedback.text.trim() : '',
+      createdDate: normalizeDeadlineDate(feedback.createdDate),
+      createdAt: typeof feedback.createdAt === 'string' && Number.isFinite(Date.parse(feedback.createdAt)) ? feedback.createdAt : '',
+    }))
+    .filter((feedback) => feedback.id && feedback.text && feedback.createdDate && feedback.createdAt && !seen.has(feedback.id) && seen.add(feedback.id))
+    .sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt))
+}
+
+export function addReviewFeedback(tasks, reviewId, textValue, feedbackId, createdDate, createdAt) {
+  if (!Array.isArray(tasks)) return []
+  const text = typeof textValue === 'string' ? textValue.trim() : ''
+  const normalizedDate = normalizeDeadlineDate(createdDate)
+  const normalizedCreatedAt = typeof createdAt === 'string' && Number.isFinite(Date.parse(createdAt)) ? createdAt : ''
+  const review = tasks.find((task) => task?.id === reviewId && task.bucket === REVIEW_BUCKET)
+  if (!review || !text || !feedbackId || !normalizedDate || !normalizedCreatedAt || reviewFeedbacks(review).some((feedback) => feedback.id === feedbackId)) return tasks
+  const feedback = { id: feedbackId, text, createdDate: normalizedDate, createdAt: normalizedCreatedAt }
+  return tasks.map((task) => task?.id === reviewId ? { ...task, reviewFeedbacks: reviewFeedbacks({ reviewFeedbacks: [feedback, ...(task.reviewFeedbacks || [])] }) } : task)
+}
+
 export function incrementReviewOccurrence(tasks, id, date) {
   if (!Array.isArray(tasks) || !normalizeDeadlineDate(date)) return Array.isArray(tasks) ? tasks : []
   return tasks.map((task) => {
