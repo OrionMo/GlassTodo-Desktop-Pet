@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { DAILY_TEMPLATE_BUCKET, DEADLINE_BUCKET, HABIT_BUCKET, HABIT_MINIMUM_UNIT_CUSTOM, HABIT_MINIMUM_UNIT_HOURS, HABIT_MINIMUM_UNIT_MINUTES, HABIT_STATE_ACTIVE, HABIT_STATE_CANDIDATE, HABIT_STATE_FINISHED, IDEA_BUCKET, IDEA_FILTER_ALL, IDEA_TAG_GOAL, IDEA_TAG_INTEREST, NOTE_BUCKET, REVIEW_BUCKET, REVIEW_CATEGORY_OTHER, REVIEW_CATEGORY_PROCESS, REVIEW_FILTER_ALL, REVIEW_STATUS_IMPROVED, REVIEW_STATUS_PENDING, REVIEW_STATUS_VERIFY, addNoteToIdeas, addNoteToToday, addReviewActionToHabits, addReviewActionToToday, addReviewFeedback, carryOverUnfinishedTasks, carryoverLabel, compareDeadlineTasks, compareNotes, compareTaskImportance, createDailyTaskSeries, dailyTaskInstanceId, deadlineStatus, findDueTaskReminders, finishHabitCycle, formatHabitMinimum, habitMinimumLabel, habitProgress, ideaMatchesFilter, incrementReviewOccurrence, markTaskReminderFired, materializeDailyTasks, migrateTasks, moveDeadlineToToday, moveHabitToToday, normalizeDeadlineDate, normalizeHabitDuration, normalizeHabitWeeklyTarget, normalizeReminderTime, normalizeReviewCategory, normalizeReviewStatus, noteDisplayTitle, noteMatchesQuery, parseHabitMinimum, recordHabitCheckIn, recordHabitRest, reminderOccurrenceKey, reviewFeedbacks, reviewMatchesFilter, setTaskReminder, skipDailyTaskForDate, startHabitCycle, stopDailyTaskSeries, toggleNotePinned, toggleTaskImportance, updateTaskDetails, upsertNote } from '../src/task-model.js'
+import { DAILY_TEMPLATE_BUCKET, DEADLINE_BUCKET, HABIT_BUCKET, HABIT_MINIMUM_UNIT_CUSTOM, HABIT_MINIMUM_UNIT_HOURS, HABIT_MINIMUM_UNIT_MINUTES, HABIT_STATE_ACTIVE, HABIT_STATE_CANDIDATE, HABIT_STATE_FINISHED, IDEA_BUCKET, IDEA_FILTER_ALL, IDEA_TAG_GOAL, IDEA_TAG_INTEREST, NOTE_BUCKET, REVIEW_BUCKET, REVIEW_CATEGORY_OTHER, REVIEW_CATEGORY_PROCESS, REVIEW_FILTER_ALL, REVIEW_STATUS_IMPROVED, REVIEW_STATUS_PENDING, REVIEW_STATUS_VERIFY, addNoteToIdeas, addNoteToToday, addReviewActionToHabits, addReviewActionToToday, addReviewFeedback, carryOverUnfinishedTasks, carryoverLabel, compareDeadlineTasks, compareNotes, compareTaskImportance, createDailyTaskSeries, dailyTaskInstanceId, deadlineStatus, findDueTaskReminders, finishHabitCycle, formatHabitMinimum, habitMinimumLabel, habitProgress, ideaMatchesFilter, incrementReviewOccurrence, markTaskReminderFired, materializeDailyTasks, migrateTasks, moveDeadlineToToday, moveHabitToToday, normalizeDeadlineDate, normalizeHabitDuration, normalizeHabitWeeklyTarget, normalizeReminderTime, normalizeReviewCategory, normalizeReviewStatus, noteDisplayTitle, noteMatchesQuery, parseHabitMinimum, recordHabitCheckIn, recordHabitRest, reminderOccurrenceKey, reviewFeedbacks, reviewMatchesFilter, setTaskReminder, skipDailyTaskForDate, startHabitCycle, stopDailyTaskSeries, toggleNotePinned, toggleTaskImportance, updateReviewFeedback, updateTaskDetails, upsertNote } from '../src/task-model.js'
 
 test('migrates legacy unfinished records into untagged ideas without changing identity or status', () => {
   const source = [{ id: 'legacy-1', title: '旧未完成事项', completed: true, date: '2026-09-17', bucket: 'unfinished' }]
@@ -415,6 +415,25 @@ test('rejects empty, invalid, and duplicate review feedback entries', () => {
   assert.equal(addReviewFeedback(source, 'review-1', '有内容', 'feedback-1', '2026-02-30', '2026-10-13T02:00:00.000Z'), source)
   const added = addReviewFeedback(source, 'review-1', '有内容', 'feedback-1', '2026-10-13', '2026-10-13T02:00:00.000Z')
   assert.equal(addReviewFeedback(added, 'review-1', '重复编号', 'feedback-1', '2026-10-14', '2026-10-14T02:00:00.000Z'), added)
+})
+
+test('edits review feedback text while preserving its original date and order', () => {
+  const source = [{
+    id: 'review-1',
+    bucket: REVIEW_BUCKET,
+    reviewFeedbacks: [
+      { id: 'feedback-2', text: '第二次回评', createdDate: '2026-10-14', createdAt: '2026-10-14T03:00:00.000Z' },
+      { id: 'feedback-1', text: '第一次回评', createdDate: '2026-10-13', createdAt: '2026-10-13T02:00:00.000Z' },
+    ],
+  }]
+  const edited = updateReviewFeedback(source, 'review-1', 'feedback-1', ' 第一次回评已修正 ')
+
+  assert.deepEqual(reviewFeedbacks(edited[0]), [
+    { id: 'feedback-2', text: '第二次回评', createdDate: '2026-10-14', createdAt: '2026-10-14T03:00:00.000Z' },
+    { id: 'feedback-1', text: '第一次回评已修正', createdDate: '2026-10-13', createdAt: '2026-10-13T02:00:00.000Z' },
+  ])
+  assert.equal(updateReviewFeedback(edited, 'review-1', 'feedback-1', '   '), edited)
+  assert.equal(updateReviewFeedback(edited, 'review-1', 'missing', '不存在'), edited)
 })
 
 test('turns one review action into one today task without duplicating it', () => {

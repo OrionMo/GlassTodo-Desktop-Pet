@@ -352,9 +352,17 @@ h1 { margin: 0; font-size: 38px; line-height: 1; letter-spacing: -.04em; font-we
 .review-feedback-form button.is-primary { color: white; border-color: transparent; background: #317add; }
 .review-feedback-form button:disabled { color: #96a0ae; background: rgba(226,232,239,.7); cursor: default; }
 .review-feedback-list { min-width: 0; display: grid; gap: 6px; }
-.review-feedback-item { min-width: 0; display: grid; grid-template-columns: 68px minmax(0, 1fr); gap: 8px; align-items: start; padding: 8px 9px; border: 1px solid rgba(64,142,106,.12); border-radius: 11px; background: rgba(237,249,243,.52); }
+.review-feedback-item { min-width: 0; display: grid; grid-template-columns: 68px minmax(0, 1fr) auto; gap: 8px; align-items: start; padding: 8px 9px; border: 1px solid rgba(64,142,106,.12); border-radius: 11px; background: rgba(237,249,243,.52); }
 .review-feedback-item time { color: #4e8c70; font-size: 9px; font-weight: 620; line-height: 1.5; }
 .review-feedback-item p { min-width: 0; margin: 0; color: #4d5d6e; font-size: 10px; line-height: 1.5; overflow-wrap: anywhere; }
+.review-feedback-edit-button { width: 25px; height: 25px; display: grid; place-items: center; border: 1px solid rgba(112,132,156,.14); border-radius: 8px; padding: 0; color: #738296; background: rgba(255,255,255,.46); cursor: pointer; }
+.review-feedback-edit-button:hover { color: #2674d2; background: rgba(255,255,255,.78); }
+.review-feedback-edit-form { min-width: 0; grid-column: 1 / -1; display: grid; grid-template-columns: 68px minmax(0, 1fr) auto auto; gap: 6px; align-items: center; }
+.review-feedback-edit-form input { min-width: 0; height: 32px; border: 1px solid rgba(45,117,219,.24); border-radius: 9px; outline: 0; padding: 0 9px; color: #3f5065; background: rgba(255,255,255,.64); font-size: 10px; }
+.review-feedback-edit-form input:focus { border-color: rgba(45,117,219,.48); box-shadow: 0 0 0 3px rgba(45,117,219,.08); }
+.review-feedback-edit-form button { height: 32px; border: 1px solid rgba(112,132,156,.14); border-radius: 9px; padding: 0 8px; color: #68778a; background: rgba(255,255,255,.52); font-size: 9px; cursor: pointer; }
+.review-feedback-edit-form button.is-primary { color: white; border-color: transparent; background: #317add; }
+.review-feedback-edit-form button:disabled { color: #96a0ae; background: rgba(226,232,239,.7); cursor: default; }
 .review-card-actions { display: flex; flex-wrap: wrap; gap: 6px; }
 .review-card-actions button { min-height: 27px; display: inline-flex; align-items: center; gap: 3px; border: 1px solid rgba(112,132,156,.14); border-radius: 9px; padding: 0 8px; color: #68778a; background: rgba(255,255,255,.42); font-size: 9px; font-weight: 560; cursor: pointer; }
 .review-card-actions button:hover { color: #2674d2; background: rgba(255,255,255,.72); }
@@ -383,7 +391,7 @@ h1 { margin: 0; font-size: 38px; line-height: 1; letter-spacing: -.04em; font-we
 .habit-end-confirm { margin-top: 9px; }
 .review-delete-confirm { width: 100%; }
 .inline-confirm button:focus-visible { outline: 3px solid rgba(203,76,85,.22); outline-offset: 2px; }
-.review-quick-add button:focus-visible, .review-filter button:focus-visible, .review-card-actions button:focus-visible, .review-feedback-form input:focus-visible, .review-feedback-form button:focus-visible, .review-editor input:focus-visible, .review-editor textarea:focus-visible, .review-editor select:focus-visible, .review-editor-actions button:focus-visible { outline: 3px solid rgba(45,117,219,.27); outline-offset: 2px; }
+.review-quick-add button:focus-visible, .review-filter button:focus-visible, .review-card-actions button:focus-visible, .review-feedback-form input:focus-visible, .review-feedback-form button:focus-visible, .review-feedback-edit-button:focus-visible, .review-feedback-edit-form input:focus-visible, .review-feedback-edit-form button:focus-visible, .review-editor input:focus-visible, .review-editor textarea:focus-visible, .review-editor select:focus-visible, .review-editor-actions button:focus-visible { outline: 3px solid rgba(45,117,219,.27); outline-offset: 2px; }
 .window-close-button { position: absolute; top: 18px; right: 18px; z-index: 4; width: 28px; height: 28px; display: grid; place-items: center; padding: 0 0 2px; border: 1px solid rgba(119,136,156,.2); border-radius: 50%; color: #708094; background: rgba(255,255,255,.52); box-shadow: inset 0 1px rgba(255,255,255,.85), 0 3px 10px rgba(53,72,94,.08); font-size: 21px; font-weight: 350; line-height: 1; cursor: pointer; transition: color .16s ease, background .16s ease, transform .16s ease; }
 .window-close-button:hover { color: #cc3b42; background: rgba(255,255,255,.82); transform: scale(1.05); }
 .window-close-button:active { transform: scale(.94); }

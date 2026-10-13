@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowClockwise, ArrowRight, CalendarBlank, CaretDown, CheckCircle, Cloud, CloudCheck, CloudSlash, Clock, Coffee, Flag, ListChecks, MagnifyingGlass, NotePencil, PencilSimple, Play, PushPin, SignOut, Target, Trash, WarningCircle } from '@phosphor-icons/react'
-import { DAILY_TEMPLATE_BUCKET, DEADLINE_BUCKET, HABIT_BUCKET, HABIT_MINIMUM_UNIT_CUSTOM, HABIT_MINIMUM_UNIT_HOURS, HABIT_MINIMUM_UNIT_MINUTES, HABIT_STATE_ACTIVE, HABIT_STATE_CANDIDATE, HABIT_STATE_FINISHED, IDEA_BUCKET, IDEA_FILTER_ALL, IDEA_TAG_GOAL, IDEA_TAG_INTEREST, NOTE_BUCKET, REVIEW_BUCKET, REVIEW_CATEGORY_ATTENTION, REVIEW_CATEGORY_COMMUNICATION, REVIEW_CATEGORY_INFORMATION, REVIEW_CATEGORY_OTHER, REVIEW_CATEGORY_PREPARATION, REVIEW_CATEGORY_PROCESS, REVIEW_CATEGORY_TIME, REVIEW_FILTER_ALL, REVIEW_STATUS_IMPROVED, REVIEW_STATUS_PENDING, REVIEW_STATUS_VERIFY, addNoteToIdeas, addNoteToToday, addReviewActionToHabits, addReviewActionToToday, addReviewFeedback, carryOverUnfinishedTasks, carryoverLabel, compareDeadlineTasks, compareNotes, compareTaskImportance, createDailyTaskSeries, deadlineStatus, findDueTaskReminders, finishHabitCycle, formatHabitMinimum, habitMinimumLabel, habitProgress, ideaMatchesFilter, incrementReviewOccurrence, markTaskReminderFired, materializeDailyTasks, migrateTasks, moveDeadlineToToday, moveHabitToToday, normalizeDeadlineDate, normalizeHabitDuration, normalizeHabitWeeklyTarget, normalizeReminderTime, normalizeReviewCategory, normalizeReviewStatus, noteDisplayTitle, noteMatchesQuery, parseHabitMinimum, recordHabitCheckIn, recordHabitRest, reminderOccurrenceKey, reviewFeedbacks, reviewMatchesFilter, setTaskReminder, skipDailyTaskForDate, startHabitCycle, stopDailyTaskSeries, toggleNotePinned, toggleTaskImportance, updateTaskDetails, upsertNote } from './task-model.js'
+import { DAILY_TEMPLATE_BUCKET, DEADLINE_BUCKET, HABIT_BUCKET, HABIT_MINIMUM_UNIT_CUSTOM, HABIT_MINIMUM_UNIT_HOURS, HABIT_MINIMUM_UNIT_MINUTES, HABIT_STATE_ACTIVE, HABIT_STATE_CANDIDATE, HABIT_STATE_FINISHED, IDEA_BUCKET, IDEA_FILTER_ALL, IDEA_TAG_GOAL, IDEA_TAG_INTEREST, NOTE_BUCKET, REVIEW_BUCKET, REVIEW_CATEGORY_ATTENTION, REVIEW_CATEGORY_COMMUNICATION, REVIEW_CATEGORY_INFORMATION, REVIEW_CATEGORY_OTHER, REVIEW_CATEGORY_PREPARATION, REVIEW_CATEGORY_PROCESS, REVIEW_CATEGORY_TIME, REVIEW_FILTER_ALL, REVIEW_STATUS_IMPROVED, REVIEW_STATUS_PENDING, REVIEW_STATUS_VERIFY, addNoteToIdeas, addNoteToToday, addReviewActionToHabits, addReviewActionToToday, addReviewFeedback, carryOverUnfinishedTasks, carryoverLabel, compareDeadlineTasks, compareNotes, compareTaskImportance, createDailyTaskSeries, deadlineStatus, findDueTaskReminders, finishHabitCycle, formatHabitMinimum, habitMinimumLabel, habitProgress, ideaMatchesFilter, incrementReviewOccurrence, markTaskReminderFired, materializeDailyTasks, migrateTasks, moveDeadlineToToday, moveHabitToToday, normalizeDeadlineDate, normalizeHabitDuration, normalizeHabitWeeklyTarget, normalizeReminderTime, normalizeReviewCategory, normalizeReviewStatus, noteDisplayTitle, noteMatchesQuery, parseHabitMinimum, recordHabitCheckIn, recordHabitRest, reminderOccurrenceKey, reviewFeedbacks, reviewMatchesFilter, setTaskReminder, skipDailyTaskForDate, startHabitCycle, stopDailyTaskSeries, toggleNotePinned, toggleTaskImportance, updateReviewFeedback, updateTaskDetails, upsertNote } from './task-model.js'
 import { useCloudSync } from './use-cloud-sync.js'
 
 const seedTitles = ['整理会议资料', '回复客户邮件', '完成产品方案初稿']
@@ -70,6 +70,8 @@ export function App() {
   const [reviewEditor, setReviewEditor] = useState({ title: '', scene: '', category: REVIEW_CATEGORY_OTHER, cause: '', action: '', status: REVIEW_STATUS_PENDING })
   const [feedbackReviewId, setFeedbackReviewId] = useState(null)
   const [reviewFeedbackDraft, setReviewFeedbackDraft] = useState('')
+  const [editingReviewFeedback, setEditingReviewFeedback] = useState(null)
+  const [reviewFeedbackEditDraft, setReviewFeedbackEditDraft] = useState('')
   const [confirmAction, setConfirmAction] = useState(null)
   const [selectedDay, setSelectedDay] = useState('today')
   const [todayDate, setTodayDate] = useState(() => dateLabel(0))
@@ -494,6 +496,7 @@ export function App() {
     setConfirmAction(null)
     setFeedbackReviewId(null)
     setReviewFeedbackDraft('')
+    cancelReviewFeedbackEdit()
     setEditingReviewId(task.id)
     setReviewEditor({
       title: task.title || '',
@@ -534,6 +537,7 @@ export function App() {
     setTasks((current) => current.filter((task) => task.id !== id))
     if (editingReviewId === id) cancelReviewEdit()
     if (feedbackReviewId === id) cancelReviewFeedback()
+    if (editingReviewFeedback?.reviewId === id) cancelReviewFeedbackEdit()
     setConfirmAction(null)
   }
 
@@ -544,6 +548,7 @@ export function App() {
   function beginReviewFeedback(id) {
     setConfirmAction(null)
     setEditingReviewId(null)
+    cancelReviewFeedbackEdit()
     setFeedbackReviewId(id)
     setReviewFeedbackDraft('')
   }
@@ -560,6 +565,28 @@ export function App() {
     const createdAt = new Date().toISOString()
     setTasks((current) => addReviewFeedback(current, feedbackReviewId, text, crypto.randomUUID(), dateLabel(0), createdAt))
     cancelReviewFeedback()
+  }
+
+  function beginReviewFeedbackEdit(reviewId, feedback) {
+    setConfirmAction(null)
+    setEditingReviewId(null)
+    cancelReviewFeedback()
+    setEditingReviewFeedback({ reviewId, feedbackId: feedback.id })
+    setReviewFeedbackEditDraft(feedback.text)
+  }
+
+  function cancelReviewFeedbackEdit() {
+    setEditingReviewFeedback(null)
+    setReviewFeedbackEditDraft('')
+  }
+
+  function saveReviewFeedbackEdit(event) {
+    event.preventDefault()
+    const text = reviewFeedbackEditDraft.trim()
+    if (!text || !editingReviewFeedback) return
+    const { reviewId, feedbackId } = editingReviewFeedback
+    setTasks((current) => updateReviewFeedback(current, reviewId, feedbackId, text))
+    cancelReviewFeedbackEdit()
   }
 
   function reviewActionToToday(id) {
@@ -714,7 +741,7 @@ export function App() {
             <div className="title-line"><h1>{isIdeas ? '想法' : isDeadlines ? 'DDL' : isHabits ? '习惯/计划' : isReviews ? '复盘' : '待办'}</h1><span className="active-count">{isHabits ? (activeHabit ? 1 : 0) : isReviews ? reviewCount : isNotebook ? noteTasks.length : active.length}</span></div>
             <div className="header-meta">
               {isIdeas ? <span className="mode-label">{isNotebook ? '轻量笔记本' : '随手记录'}</span> : isDeadlines ? <span className="mode-label">按截止日期排序</span> : isHabits ? <span className="mode-label">一次专注一个</span> : isReviews ? <span className="mode-label">问题变成行动</span> : <time dateTime={selectedDate}>{selectedDate}</time>}
-              <span className="version-label">v7.14.0 · Sync</span>
+              <span className="version-label">v7.14.1 · Sync</span>
               <button type="button" className={`cloud-status-button is-${cloud.status}`} aria-expanded={syncPanelOpen} onClick={() => setSyncPanelOpen((value) => !value)}>{cloudIcon()}<span>{cloud.session ? '已连接' : '云同步'}</span></button>
             </div>
           </header>
@@ -897,7 +924,21 @@ export function App() {
                           <button type="button" onClick={cancelReviewFeedback}>取消</button>
                         </form>}
                         {feedbacks.length > 0 && <div className="review-feedback-list" aria-label={`${review.title}的回评记录`}>
-                          {feedbacks.map((feedback) => <div className="review-feedback-item" key={feedback.id}><time dateTime={feedback.createdDate}>{feedback.createdDate}</time><p>{feedback.text}</p></div>)}
+                          {feedbacks.map((feedback) => {
+                            const isFeedbackEditing = editingReviewFeedback?.reviewId === review.id && editingReviewFeedback.feedbackId === feedback.id
+                            return <div className="review-feedback-item" key={feedback.id}>
+                              {isFeedbackEditing ? <form className="review-feedback-edit-form" onSubmit={saveReviewFeedbackEdit}>
+                                <time dateTime={feedback.createdDate}>{feedback.createdDate}</time>
+                                <input aria-label={`编辑回评：${feedback.text}`} value={reviewFeedbackEditDraft} onChange={(event) => setReviewFeedbackEditDraft(event.target.value)} onKeyDown={(event) => { if (event.key === 'Escape') { event.preventDefault(); cancelReviewFeedbackEdit() } else if (event.key === 'Enter' && event.nativeEvent.isComposing) event.preventDefault() }} autoFocus />
+                                <button className="is-primary" type="submit" disabled={!reviewFeedbackEditDraft.trim()}>保存</button>
+                                <button type="button" onClick={cancelReviewFeedbackEdit}>取消</button>
+                              </form> : <>
+                                <time dateTime={feedback.createdDate}>{feedback.createdDate}</time>
+                                <p>{feedback.text}</p>
+                                <button className="review-feedback-edit-button" type="button" aria-label={`编辑回评：${feedback.text}`} onClick={() => beginReviewFeedbackEdit(review.id, feedback)}><PencilSimple size={13} /></button>
+                              </>}
+                            </div>
+                          })}
                         </div>}
                         <div className="review-card-actions">
                           <button type="button" onClick={() => repeatReview(review.id)}>再次发生 +1</button>

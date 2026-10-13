@@ -194,6 +194,19 @@ export function addReviewFeedback(tasks, reviewId, textValue, feedbackId, create
   return tasks.map((task) => task?.id === reviewId ? { ...task, reviewFeedbacks: reviewFeedbacks({ reviewFeedbacks: [feedback, ...(task.reviewFeedbacks || [])] }) } : task)
 }
 
+export function updateReviewFeedback(tasks, reviewId, feedbackId, textValue) {
+  if (!Array.isArray(tasks)) return []
+  const text = typeof textValue === 'string' ? textValue.trim() : ''
+  const review = tasks.find((task) => task?.id === reviewId && task.bucket === REVIEW_BUCKET)
+  const feedbacks = reviewFeedbacks(review)
+  const feedback = feedbacks.find((item) => item.id === feedbackId)
+  if (!review || !feedback || !text || feedback.text === text) return tasks
+  return tasks.map((task) => task?.id === reviewId ? {
+    ...task,
+    reviewFeedbacks: feedbacks.map((item) => item.id === feedbackId ? { ...item, text } : item),
+  } : task)
+}
+
 export function incrementReviewOccurrence(tasks, id, date) {
   if (!Array.isArray(tasks) || !normalizeDeadlineDate(date)) return Array.isArray(tasks) ? tasks : []
   return tasks.map((task) => {
