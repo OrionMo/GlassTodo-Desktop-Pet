@@ -20,6 +20,7 @@ export const REVIEW_CATEGORY_COMMUNICATION = 'communication'
 export const REVIEW_CATEGORY_INFORMATION = 'information'
 export const REVIEW_CATEGORY_PROCESS = 'process'
 export const REVIEW_CATEGORY_OTHER = 'other'
+export const DAILY_TEMPLATE_BUCKET = 'daily-template'
 export const IDEA_FILTER_ALL = 'all'
 export const IDEA_TAG_GOAL = 'goal'
 export const IDEA_TAG_INTEREST = 'interest'
@@ -73,6 +74,22 @@ export function migrateTasks(tasks) {
     if (task.bucket === HABIT_BUCKET) {
       const minimum = habitMinimumLabel(task.habitMinimum)
       if (minimum && minimum !== task.habitMinimum) migrated = { ...migrated, habitMinimum: minimum }
+    }
+
+    if (task.bucket === DAILY_TEMPLATE_BUCKET) {
+      const dailyCreatedDate = normalizeDeadlineDate(task.dailyCreatedDate)
+      const dailyStoppedAt = normalizeDeadlineDate(task.dailyStoppedAt)
+      const dailySkippedDates = normalizeDailyDates(task.dailySkippedDates)
+      const normalized = {
+        ...migrated,
+        dailyActive: task.dailyActive !== false,
+        ...(dailyCreatedDate ? { dailyCreatedDate } : {}),
+        ...(dailyStoppedAt ? { dailyStoppedAt } : {}),
+        dailySkippedDates,
+      }
+      if (!dailyCreatedDate) delete normalized.dailyCreatedDate
+      if (!dailyStoppedAt) delete normalized.dailyStoppedAt
+      migrated = normalized
     }
 
     if (task.bucket !== 'unfinished' && task.bucket !== IDEA_BUCKET) return migrated
@@ -209,7 +226,7 @@ export function carryOverUnfinishedTasks(tasks, todayDate) {
   let changed = false
   const next = tasks.map((task) => {
     const taskDate = normalizeDeadlineDate(task?.date)
-    if (!task || task.completed || task.bucket || !taskDate || taskDate >= todayDate) return task
+    if (!task || task.completed || task.bucket || task.dailyTemplateId || !taskDate || taskDate >= todayDate) return task
 
     const elapsedDays = calendarDayDistance(taskDate, todayDate)
     if (elapsedDays < 1) return task
@@ -224,6 +241,91 @@ export function carryOverUnfinishedTasks(tasks, todayDate) {
   })
 
   return changed ? next : tasks
+}
+
+function normalizeDailyDates(value) {
+  if (!Array.isArray(value)) return []
+  return [...new Set(value.map(normalizeDeadlineDate).filter(Boolean))].sort()
+}
+
+export function dailyTaskInstanceId(templateId, date) {
+  const normalizedDate = normalizeDeadlineDate(date)
+  return templateId && normalizedDate ? `${templateId}@${normalizedDate}` : null
+}
+
+function dailyTaskInstance(template, date) {
+  const id = dailyTaskInstanceId(template?.id, date)
+  if (!id) return null
+  const reminderTime = normalizeReminderTime(template.reminderTime)
+  return {
+    id,
+    title: String(template.title || '').trim(),
+    completed: false,
+    date,
+    dailyTemplateId: template.id,
+    ...(reminderTime ? { reminderTime } : {}),
+  }
+}
+
+export function createDailyTaskSeries(tasks, title, date, templateId, reminderValue = '') {
+  if (!Array.isArray(tasks)) return []
+  const normalizedTitle = typeof title === 'string' ? title.trim() : ''
+  const normalizedDate = normalizeDeadlineDate(date)
+  const reminderTime = normalizeReminderTime(reminderValue)
+  if (!normalizedTitle || !normalizedDate || !templateId || tasks.some((task) => task?.id === templateId)) return tasks
+  const template = {
+    id: templateId,
+    title: normalizedTitle,
+    completed: false,
+    bucket: DAILY_TEMPLATE_BUCKET,
+    dailyActive: true,
+    dailyCreatedDate: normalizedDate,
+    dailySkippedDates: [],
+    ...(reminderTime ? { reminderTime } : {}),
+  }
+  const instance = dailyTaskInstance(template, normalizedDate)
+  return instance ? [instance, template, ...tasks] : tasks
+}
+
+export function materializeDailyTasks(tasks, date) {
+  const normalizedDate = normalizeDeadlineDate(date)
+  if (!Array.isArray(tasks) || !normalizedDate) return Array.isArray(tasks) ? tasks : []
+  const ids = new Set(tasks.map((task) => task?.id).filter(Boolean))
+  const created = []
+
+  for (const template of tasks) {
+    if (template?.bucket !== DAILY_TEMPLATE_BUCKET || template.dailyActive === false) continue
+    const createdDate = normalizeDeadlineDate(template.dailyCreatedDate)
+    if (createdDate && createdDate > normalizedDate) continue
+    if (normalizeDailyDates(template.dailySkippedDates).includes(normalizedDate)) continue
+    const instance = dailyTaskInstance(template, normalizedDate)
+    if (!instance || ids.has(instance.id)) continue
+    ids.add(instance.id)
+    created.push(instance)
+  }
+
+  return created.length > 0 ? [...created, ...tasks] : tasks
+}
+
+export function skipDailyTaskForDate(tasks, instanceId) {
+  if (!Array.isArray(tasks)) return []
+  const instance = tasks.find((task) => task?.id === instanceId && task.dailyTemplateId)
+  const date = normalizeDeadlineDate(instance?.date)
+  if (!instance || !date) return tasks
+  return tasks
+    .filter((task) => task?.id !== instanceId)
+    .map((task) => task?.id === instance.dailyTemplateId && task.bucket === DAILY_TEMPLATE_BUCKET
+      ? { ...task, dailySkippedDates: normalizeDailyDates([...(task.dailySkippedDates || []), date]) }
+      : task)
+}
+
+export function stopDailyTaskSeries(tasks, instanceId, stoppedAt) {
+  if (!Array.isArray(tasks) || !normalizeDeadlineDate(stoppedAt)) return Array.isArray(tasks) ? tasks : []
+  const instance = tasks.find((task) => task?.id === instanceId && task.dailyTemplateId)
+  if (!instance) return tasks
+  return tasks.map((task) => task?.id === instance.dailyTemplateId && task.bucket === DAILY_TEMPLATE_BUCKET
+    ? { ...task, dailyActive: false, dailyStoppedAt: stoppedAt }
+    : task)
 }
 
 export function carryoverLabel(task) {
@@ -251,6 +353,17 @@ export function updateTaskDetails(tasks, id, draft) {
   const task = tasks.find((item) => item?.id === id)
   const title = typeof draft?.title === 'string' ? draft.title.trim() : ''
   if (!task || !title) return tasks
+
+  if (task.dailyTemplateId) {
+    const rawReminderTime = typeof draft?.reminderTime === 'string' ? draft.reminderTime.trim() : ''
+    const reminderTime = normalizeReminderTime(rawReminderTime)
+    if (rawReminderTime && !reminderTime) return tasks
+    return tasks.map((item) => {
+      if (item?.id !== id && item?.id !== task.dailyTemplateId) return item
+      const { reminderTime: _time, reminderFiredFor: _fired, ...rest } = item
+      return reminderTime ? { ...rest, title, reminderTime } : { ...rest, title }
+    })
+  }
 
   let deadlineDate = null
   let deadlineTime = null
@@ -431,8 +544,9 @@ export function reminderOccurrenceKey(task) {
 export function setTaskReminder(tasks, id, value) {
   if (!Array.isArray(tasks)) return []
   const reminderTime = normalizeReminderTime(value)
+  const target = tasks.find((task) => task?.id === id)
   return tasks.map((task) => {
-    if (task?.id !== id) return task
+    if (task?.id !== id && (!target?.dailyTemplateId || task?.id !== target.dailyTemplateId)) return task
     const { reminderTime: _time, reminderFiredFor: _fired, ...rest } = task
     return reminderTime ? { ...rest, reminderTime } : rest
   })

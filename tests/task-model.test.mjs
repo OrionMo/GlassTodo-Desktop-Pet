@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { DEADLINE_BUCKET, HABIT_BUCKET, HABIT_MINIMUM_UNIT_CUSTOM, HABIT_MINIMUM_UNIT_HOURS, HABIT_MINIMUM_UNIT_MINUTES, HABIT_STATE_ACTIVE, HABIT_STATE_CANDIDATE, HABIT_STATE_FINISHED, IDEA_BUCKET, IDEA_FILTER_ALL, IDEA_TAG_GOAL, IDEA_TAG_INTEREST, NOTE_BUCKET, REVIEW_BUCKET, REVIEW_CATEGORY_OTHER, REVIEW_CATEGORY_PROCESS, REVIEW_FILTER_ALL, REVIEW_STATUS_IMPROVED, REVIEW_STATUS_PENDING, REVIEW_STATUS_VERIFY, addNoteToIdeas, addNoteToToday, addReviewActionToHabits, addReviewActionToToday, carryOverUnfinishedTasks, carryoverLabel, compareDeadlineTasks, compareNotes, compareTaskImportance, deadlineStatus, findDueTaskReminders, finishHabitCycle, formatHabitMinimum, habitMinimumLabel, habitProgress, ideaMatchesFilter, incrementReviewOccurrence, markTaskReminderFired, migrateTasks, moveDeadlineToToday, moveHabitToToday, normalizeDeadlineDate, normalizeHabitDuration, normalizeHabitWeeklyTarget, normalizeReminderTime, normalizeReviewCategory, normalizeReviewStatus, noteDisplayTitle, noteMatchesQuery, parseHabitMinimum, recordHabitCheckIn, recordHabitRest, reminderOccurrenceKey, reviewMatchesFilter, setTaskReminder, startHabitCycle, toggleNotePinned, toggleTaskImportance, updateTaskDetails, upsertNote } from '../src/task-model.js'
+import { DAILY_TEMPLATE_BUCKET, DEADLINE_BUCKET, HABIT_BUCKET, HABIT_MINIMUM_UNIT_CUSTOM, HABIT_MINIMUM_UNIT_HOURS, HABIT_MINIMUM_UNIT_MINUTES, HABIT_STATE_ACTIVE, HABIT_STATE_CANDIDATE, HABIT_STATE_FINISHED, IDEA_BUCKET, IDEA_FILTER_ALL, IDEA_TAG_GOAL, IDEA_TAG_INTEREST, NOTE_BUCKET, REVIEW_BUCKET, REVIEW_CATEGORY_OTHER, REVIEW_CATEGORY_PROCESS, REVIEW_FILTER_ALL, REVIEW_STATUS_IMPROVED, REVIEW_STATUS_PENDING, REVIEW_STATUS_VERIFY, addNoteToIdeas, addNoteToToday, addReviewActionToHabits, addReviewActionToToday, carryOverUnfinishedTasks, carryoverLabel, compareDeadlineTasks, compareNotes, compareTaskImportance, createDailyTaskSeries, dailyTaskInstanceId, deadlineStatus, findDueTaskReminders, finishHabitCycle, formatHabitMinimum, habitMinimumLabel, habitProgress, ideaMatchesFilter, incrementReviewOccurrence, markTaskReminderFired, materializeDailyTasks, migrateTasks, moveDeadlineToToday, moveHabitToToday, normalizeDeadlineDate, normalizeHabitDuration, normalizeHabitWeeklyTarget, normalizeReminderTime, normalizeReviewCategory, normalizeReviewStatus, noteDisplayTitle, noteMatchesQuery, parseHabitMinimum, recordHabitCheckIn, recordHabitRest, reminderOccurrenceKey, reviewMatchesFilter, setTaskReminder, skipDailyTaskForDate, startHabitCycle, stopDailyTaskSeries, toggleNotePinned, toggleTaskImportance, updateTaskDetails, upsertNote } from '../src/task-model.js'
 
 test('migrates legacy unfinished records into untagged ideas without changing identity or status', () => {
   const source = [{ id: 'legacy-1', title: '旧未完成事项', completed: true, date: '2026-09-17', bucket: 'unfinished' }]
@@ -124,6 +124,101 @@ test('counts missed calendar days and remains idempotent on the same day', () =>
   assert.equal(sameDay, carried)
   assert.equal(nextDay[0].carryoverCount, 4)
   assert.equal(nextDay[0].carriedFromDate, '2026-09-28')
+})
+
+test('creates a daily template and one deterministic occurrence for today', () => {
+  const created = createDailyTaskSeries([], '  每日喝水  ', '2026-10-13', 'daily-1', '09:30')
+  const occurrence = created.find((task) => task.dailyTemplateId === 'daily-1')
+  const template = created.find((task) => task.id === 'daily-1')
+
+  assert.deepEqual(occurrence, {
+    id: dailyTaskInstanceId('daily-1', '2026-10-13'),
+    title: '每日喝水',
+    completed: false,
+    date: '2026-10-13',
+    dailyTemplateId: 'daily-1',
+    reminderTime: '09:30',
+  })
+  assert.deepEqual(template, {
+    id: 'daily-1',
+    title: '每日喝水',
+    completed: false,
+    bucket: DAILY_TEMPLATE_BUCKET,
+    dailyActive: true,
+    dailyCreatedDate: '2026-10-13',
+    dailySkippedDates: [],
+    reminderTime: '09:30',
+  })
+})
+
+test('materializes one independent occurrence per day without carrying the previous day forward', () => {
+  const dayOne = createDailyTaskSeries([], '每日复盘', '2026-10-13', 'daily-1')
+  const completedDayOne = dayOne.map((task) => task.dailyTemplateId === 'daily-1' ? { ...task, completed: true } : task)
+  const dayTwo = materializeDailyTasks(carryOverUnfinishedTasks(completedDayOne, '2026-10-14'), '2026-10-14')
+  const sameDay = materializeDailyTasks(dayTwo, '2026-10-14')
+
+  assert.equal(dayTwo.find((task) => task.id === 'daily-1@2026-10-13').completed, true)
+  assert.deepEqual(dayTwo.find((task) => task.id === 'daily-1@2026-10-14'), {
+    id: 'daily-1@2026-10-14',
+    title: '每日复盘',
+    completed: false,
+    date: '2026-10-14',
+    dailyTemplateId: 'daily-1',
+  })
+  assert.equal(sameDay, dayTwo)
+})
+
+test('does not carry an unfinished daily occurrence into the next day', () => {
+  const dayOne = createDailyTaskSeries([], '每日拉伸', '2026-10-13', 'daily-1')
+  const carried = carryOverUnfinishedTasks(dayOne, '2026-10-14')
+
+  assert.equal(carried, dayOne)
+  assert.equal(carried.find((task) => task.dailyTemplateId === 'daily-1').date, '2026-10-13')
+})
+
+test('deleting only today records a skip while allowing tomorrow to appear', () => {
+  const created = createDailyTaskSeries([], '每日阅读', '2026-10-13', 'daily-1')
+  const skipped = skipDailyTaskForDate(created, 'daily-1@2026-10-13')
+  const retriedToday = materializeDailyTasks(skipped, '2026-10-13')
+  const tomorrow = materializeDailyTasks(retriedToday, '2026-10-14')
+
+  assert.equal(retriedToday.some((task) => task.id === 'daily-1@2026-10-13'), false)
+  assert.deepEqual(retriedToday.find((task) => task.id === 'daily-1').dailySkippedDates, ['2026-10-13'])
+  assert.equal(tomorrow.some((task) => task.id === 'daily-1@2026-10-14'), true)
+})
+
+test('stopping a daily series keeps today but prevents future occurrences', () => {
+  const created = createDailyTaskSeries([], '每日整理', '2026-10-13', 'daily-1')
+  const stopped = stopDailyTaskSeries(created, 'daily-1@2026-10-13', '2026-10-13')
+  const tomorrow = materializeDailyTasks(stopped, '2026-10-14')
+  const template = tomorrow.find((task) => task.id === 'daily-1')
+
+  assert.equal(tomorrow.some((task) => task.id === 'daily-1@2026-10-13'), true)
+  assert.equal(tomorrow.some((task) => task.id === 'daily-1@2026-10-14'), false)
+  assert.equal(template.dailyActive, false)
+  assert.equal(template.dailyStoppedAt, '2026-10-13')
+})
+
+test('editing a daily occurrence updates today and the template but preserves past history', () => {
+  const dayOne = createDailyTaskSeries([], '旧名称', '2026-10-12', 'daily-1', '08:00')
+  const dayTwo = materializeDailyTasks(dayOne, '2026-10-13')
+  const edited = updateTaskDetails(dayTwo, 'daily-1@2026-10-13', { title: '新名称', reminderTime: '10:15' })
+  const dayThree = materializeDailyTasks(edited, '2026-10-14')
+
+  assert.equal(dayThree.find((task) => task.id === 'daily-1@2026-10-12').title, '旧名称')
+  assert.equal(dayThree.find((task) => task.id === 'daily-1@2026-10-13').title, '新名称')
+  assert.equal(dayThree.find((task) => task.id === 'daily-1').reminderTime, '10:15')
+  assert.equal(dayThree.find((task) => task.id === 'daily-1@2026-10-14').title, '新名称')
+  assert.equal(dayThree.find((task) => task.id === 'daily-1@2026-10-14').reminderTime, '10:15')
+})
+
+test('changing a daily reminder updates the template used by future occurrences', () => {
+  const created = createDailyTaskSeries([], '每日记录', '2026-10-13', 'daily-1')
+  const scheduled = setTaskReminder(created, 'daily-1@2026-10-13', '18:20')
+  const tomorrow = materializeDailyTasks(scheduled, '2026-10-14')
+
+  assert.equal(tomorrow.find((task) => task.id === 'daily-1').reminderTime, '18:20')
+  assert.equal(tomorrow.find((task) => task.id === 'daily-1@2026-10-14').reminderTime, '18:20')
 })
 
 test('normalizes reminder time and rejects invalid values', () => {

@@ -139,6 +139,10 @@ h1 { margin: 0; font-size: 38px; line-height: 1; letter-spacing: -.04em; font-we
 .quick-add:focus-within { box-shadow: 0 0 0 4px rgba(36,124,255,.12), inset 0 1px rgba(255,255,255,.8); }
 .quick-add input { width: 100%; border: 0; outline: 0; background: transparent; padding: 0 18px; font-size: 17px; color: #1b2532; }
 .quick-add input::placeholder { color: #8793a3; }
+.daily-add-toggle { flex: 0 0 auto; height: 34px; display: inline-flex; align-items: center; gap: 4px; margin-right: 11px; border: 1px solid rgba(112,132,156,.18); border-radius: 11px; padding: 0 10px; color: #6c7888; background: rgba(255,255,255,.4); font-size: 11px; font-weight: 600; cursor: pointer; transition: color .16s ease, border-color .16s ease, background .16s ease, transform .16s ease; }
+.daily-add-toggle:hover { color: #2675d7; border-color: rgba(35,125,242,.24); background: rgba(229,241,255,.72); }
+.daily-add-toggle.is-active { color: #176fdf; border-color: rgba(35,125,242,.34); background: rgba(214,233,255,.9); box-shadow: inset 0 1px rgba(255,255,255,.76); }
+.daily-add-toggle:active { transform: scale(.96); }
 .deadline-add { display: grid; gap: 9px; margin-bottom: 18px; }
 .deadline-add > .task-draft-input { width: 100%; height: 54px; border: 1.5px solid rgba(35,124,255,.72); border-radius: 18px; outline: 0; padding: 0 18px; color: #1b2532; background: rgba(248,251,255,.38); box-shadow: 0 0 0 3px rgba(36,124,255,.08), inset 0 1px rgba(255,255,255,.8); font-size: 16px; }
 .deadline-add > .task-draft-input:focus { box-shadow: 0 0 0 4px rgba(36,124,255,.12), inset 0 1px rgba(255,255,255,.8); }
@@ -161,6 +165,7 @@ h1 { margin: 0; font-size: 38px; line-height: 1; letter-spacing: -.04em; font-we
 .task-copy { min-width: 0; flex: 1; display: grid; gap: 7px; }
 .task-title { min-width: 0; display: block; }
 .task-carryover-label { width: fit-content; display: inline-flex; align-items: center; gap: 4px; padding: 3px 7px; border: 1px solid rgba(92,98,224,.2); border-radius: 999px; color: #5962c9; background: rgba(230,232,255,.72); font-size: 10px; font-weight: 590; line-height: 1; }
+.task-daily-label { width: fit-content; display: inline-flex; align-items: center; gap: 4px; padding: 3px 7px; border: 1px solid rgba(31,143,112,.2); border-radius: 999px; color: #217b65; background: rgba(218,245,236,.7); font-size: 10px; font-weight: 590; line-height: 1; }
 .task-reminder-label { width: fit-content; display: inline-flex; align-items: center; gap: 4px; padding: 3px 7px; border: 1px solid rgba(35,125,242,.18); border-radius: 999px; color: #2378d8; background: rgba(220,237,255,.56); font-size: 10px; font-weight: 580; line-height: 1; }
 .task-habit-label { width: fit-content; display: inline-flex; align-items: center; gap: 4px; padding: 3px 7px; border: 1px solid rgba(92,106,224,.18); border-radius: 999px; color: #5965ca; background: rgba(230,231,255,.6); font-size: 10px; font-weight: 580; line-height: 1; }
 .task-reminder-editor { display: flex; align-items: center; gap: 6px; }
@@ -206,19 +211,27 @@ h1 { margin: 0; font-size: 38px; line-height: 1; letter-spacing: -.04em; font-we
 .idea-schedule-actions .task-edit-button, .deadline-actions .task-edit-button { width: 100%; min-width: 0; }
 .task-edit-form { min-width: 0; width: 100%; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px; }
 .task-edit-form.is-deadline { grid-template-columns: minmax(0, 1fr); }
+.task-edit-form.is-daily { grid-template-columns: minmax(0, 1fr); }
 .task-edit-title { min-width: 0; width: 100%; height: 36px; border: 1px solid rgba(35,125,242,.3); border-radius: 11px; outline: 0; padding: 0 11px; color: #243247; background: rgba(249,252,255,.78); box-shadow: inset 0 1px rgba(255,255,255,.88); font-size: 14px; font-weight: 540; }
 .task-edit-title:focus { border-color: rgba(35,125,242,.55); box-shadow: 0 0 0 3px rgba(35,125,242,.1), inset 0 1px rgba(255,255,255,.88); }
 .task-edit-deadline-fields { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) 120px; gap: 7px; }
 .task-edit-deadline-fields label { min-width: 0; height: 32px; display: flex; align-items: center; gap: 5px; padding: 0 8px; border: 1px solid rgba(112,132,156,.17); border-radius: 10px; color: #6d7b8c; background: rgba(255,255,255,.42); }
 .task-edit-deadline-fields input { min-width: 0; width: 100%; border: 0; outline: 0; padding: 0; color: #526174; background: transparent; font-size: 11px; color-scheme: light; }
+.daily-edit-reminder { min-width: 0; height: 34px; display: flex; align-items: center; gap: 8px; padding: 0 9px; border: 1px solid rgba(112,132,156,.16); border-radius: 10px; color: #68778a; background: rgba(255,255,255,.4); font-size: 10px; font-weight: 570; }
+.daily-edit-reminder input { min-width: 0; flex: 1; border: 0; outline: 0; padding: 0; color: #366384; background: transparent; font-size: 11px; color-scheme: light; }
+.daily-edit-options, .daily-edit-confirm { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+.daily-edit-options small { flex: 1 1 140px; color: #7d8998; font-size: 9px; }
+.daily-edit-options button, .daily-edit-confirm button { height: 28px; border: 1px solid rgba(112,132,156,.15); border-radius: 8px; padding: 0 8px; color: #68778a; background: rgba(255,255,255,.42); font-size: 10px; cursor: pointer; }
+.daily-edit-options button.is-danger, .daily-edit-confirm button.is-danger { color: #bd515a; border-color: rgba(189,81,90,.18); background: rgba(255,235,237,.62); }
+.daily-edit-confirm > span { flex: 1 1 170px; color: #7b5660; font-size: 10px; }
 .task-edit-actions { display: flex; align-items: center; justify-content: flex-end; gap: 6px; }
 .task-edit-actions button { height: 30px; border: 1px solid rgba(112,132,156,.16); border-radius: 9px; padding: 0 10px; color: #667589; background: rgba(255,255,255,.46); font-size: 11px; font-weight: 560; cursor: pointer; }
 .task-edit-actions .task-edit-save { color: white; border-color: transparent; background: #247df0; }
 .task-edit-actions .task-edit-save:disabled { color: #8a96a5; background: rgba(222,229,237,.88); cursor: default; }
-.task-edit-form.is-deadline .task-edit-actions { grid-column: 1; }
+.task-edit-form.is-deadline .task-edit-actions, .task-edit-form.is-daily .task-edit-actions { grid-column: 1; }
 .check-button { width: 28px; height: 28px; flex: 0 0 28px; border-radius: 50%; border: 1.7px solid #718092; background: rgba(255,255,255,.12); cursor: pointer; transition: border-color .18s ease, background .18s ease, transform .18s ease; }
 .check-button:hover { border-color: #2380ff; background: rgba(35,128,255,.09); transform: scale(1.06); }
-.check-button:focus-visible, .reminder-button:focus-visible, .important-button:focus-visible, .task-edit-button:focus-visible, .task-edit-form input:focus-visible, .task-edit-actions button:focus-visible, .task-reminder-editor input:focus-visible, .deadline-add input:focus-visible, .deadline-add button:focus-visible, .deadline-actions button:focus-visible, .completed-toggle:focus-visible, .completed-restore:focus-visible { outline: 3px solid rgba(35,128,255,.35); outline-offset: 2px; }
+.check-button:focus-visible, .reminder-button:focus-visible, .important-button:focus-visible, .task-edit-button:focus-visible, .task-edit-form input:focus-visible, .task-edit-actions button:focus-visible, .task-reminder-editor input:focus-visible, .daily-add-toggle:focus-visible, .daily-edit-options button:focus-visible, .daily-edit-confirm button:focus-visible, .deadline-add input:focus-visible, .deadline-add button:focus-visible, .deadline-actions button:focus-visible, .completed-toggle:focus-visible, .completed-restore:focus-visible { outline: 3px solid rgba(35,128,255,.35); outline-offset: 2px; }
 .empty { margin: 72px 0; text-align: center; color: #768394; font-size: 16px; }
 .completed-shelf { margin: 0 -28px; min-height: 82px; border-top: 1px solid rgba(255,255,255,.75); background: rgba(232,239,247,.48); box-shadow: inset 0 1px 12px rgba(255,255,255,.66), 0 -10px 28px rgba(108,128,153,.08); backdrop-filter: blur(34px) saturate(130%); -webkit-backdrop-filter: blur(34px) saturate(130%); }
 .completed-toggle { width: 100%; height: 82px; border: 0; background: transparent; display: flex; align-items: center; gap: 13px; padding: 0 38px; cursor: pointer; font-size: 17px; color: #5e6b7c; text-align: left; }

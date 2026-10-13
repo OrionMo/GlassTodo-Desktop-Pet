@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowClockwise, ArrowRight, CalendarBlank, CaretDown, CheckCircle, Cloud, CloudCheck, CloudSlash, Clock, Coffee, Flag, ListChecks, MagnifyingGlass, NotePencil, PencilSimple, Play, PushPin, SignOut, Target, Trash, WarningCircle } from '@phosphor-icons/react'
-import { DEADLINE_BUCKET, HABIT_BUCKET, HABIT_MINIMUM_UNIT_CUSTOM, HABIT_MINIMUM_UNIT_HOURS, HABIT_MINIMUM_UNIT_MINUTES, HABIT_STATE_ACTIVE, HABIT_STATE_CANDIDATE, HABIT_STATE_FINISHED, IDEA_BUCKET, IDEA_FILTER_ALL, IDEA_TAG_GOAL, IDEA_TAG_INTEREST, NOTE_BUCKET, REVIEW_BUCKET, REVIEW_CATEGORY_ATTENTION, REVIEW_CATEGORY_COMMUNICATION, REVIEW_CATEGORY_INFORMATION, REVIEW_CATEGORY_OTHER, REVIEW_CATEGORY_PREPARATION, REVIEW_CATEGORY_PROCESS, REVIEW_CATEGORY_TIME, REVIEW_FILTER_ALL, REVIEW_STATUS_IMPROVED, REVIEW_STATUS_PENDING, REVIEW_STATUS_VERIFY, addNoteToIdeas, addNoteToToday, addReviewActionToHabits, addReviewActionToToday, carryOverUnfinishedTasks, carryoverLabel, compareDeadlineTasks, compareNotes, compareTaskImportance, deadlineStatus, findDueTaskReminders, finishHabitCycle, formatHabitMinimum, habitMinimumLabel, habitProgress, ideaMatchesFilter, incrementReviewOccurrence, markTaskReminderFired, migrateTasks, moveDeadlineToToday, moveHabitToToday, normalizeDeadlineDate, normalizeHabitDuration, normalizeHabitWeeklyTarget, normalizeReminderTime, normalizeReviewCategory, normalizeReviewStatus, noteDisplayTitle, noteMatchesQuery, parseHabitMinimum, recordHabitCheckIn, recordHabitRest, reminderOccurrenceKey, reviewMatchesFilter, setTaskReminder, startHabitCycle, toggleNotePinned, toggleTaskImportance, updateTaskDetails, upsertNote } from './task-model.js'
+import { DAILY_TEMPLATE_BUCKET, DEADLINE_BUCKET, HABIT_BUCKET, HABIT_MINIMUM_UNIT_CUSTOM, HABIT_MINIMUM_UNIT_HOURS, HABIT_MINIMUM_UNIT_MINUTES, HABIT_STATE_ACTIVE, HABIT_STATE_CANDIDATE, HABIT_STATE_FINISHED, IDEA_BUCKET, IDEA_FILTER_ALL, IDEA_TAG_GOAL, IDEA_TAG_INTEREST, NOTE_BUCKET, REVIEW_BUCKET, REVIEW_CATEGORY_ATTENTION, REVIEW_CATEGORY_COMMUNICATION, REVIEW_CATEGORY_INFORMATION, REVIEW_CATEGORY_OTHER, REVIEW_CATEGORY_PREPARATION, REVIEW_CATEGORY_PROCESS, REVIEW_CATEGORY_TIME, REVIEW_FILTER_ALL, REVIEW_STATUS_IMPROVED, REVIEW_STATUS_PENDING, REVIEW_STATUS_VERIFY, addNoteToIdeas, addNoteToToday, addReviewActionToHabits, addReviewActionToToday, carryOverUnfinishedTasks, carryoverLabel, compareDeadlineTasks, compareNotes, compareTaskImportance, createDailyTaskSeries, deadlineStatus, findDueTaskReminders, finishHabitCycle, formatHabitMinimum, habitMinimumLabel, habitProgress, ideaMatchesFilter, incrementReviewOccurrence, markTaskReminderFired, materializeDailyTasks, migrateTasks, moveDeadlineToToday, moveHabitToToday, normalizeDeadlineDate, normalizeHabitDuration, normalizeHabitWeeklyTarget, normalizeReminderTime, normalizeReviewCategory, normalizeReviewStatus, noteDisplayTitle, noteMatchesQuery, parseHabitMinimum, recordHabitCheckIn, recordHabitRest, reminderOccurrenceKey, reviewMatchesFilter, setTaskReminder, skipDailyTaskForDate, startHabitCycle, stopDailyTaskSeries, toggleNotePinned, toggleTaskImportance, updateTaskDetails, upsertNote } from './task-model.js'
 import { useCloudSync } from './use-cloud-sync.js'
 
 const seedTitles = ['整理会议资料', '回复客户邮件', '完成产品方案初稿']
@@ -55,6 +55,7 @@ export function App() {
   const isDesktop = hasDesktopBridge || desktopPreview
   const [tasks, setTasks] = useState(loadTasks)
   const [draft, setDraft] = useState('')
+  const [dailyFixed, setDailyFixed] = useState(false)
   const [deadlineDate, setDeadlineDate] = useState(() => dateLabel(1))
   const [deadlineTime, setDeadlineTime] = useState('')
   const [habitName, setHabitName] = useState('')
@@ -82,7 +83,7 @@ export function App() {
   const [editingReminderId, setEditingReminderId] = useState(null)
   const [reminderDraft, setReminderDraft] = useState('')
   const [editingTaskId, setEditingTaskId] = useState(null)
-  const [taskEditor, setTaskEditor] = useState({ title: '', deadlineDate: '', deadlineTime: '' })
+  const [taskEditor, setTaskEditor] = useState({ title: '', deadlineDate: '', deadlineTime: '', reminderTime: '' })
   const [highlightedTaskId, setHighlightedTaskId] = useState(null)
   const [syncPanelOpen, setSyncPanelOpen] = useState(false)
   const [authMode, setAuthMode] = useState('signin')
@@ -138,7 +139,7 @@ export function App() {
   }, [])
 
   useEffect(() => {
-    setTasks((current) => carryOverUnfinishedTasks(current, todayDate))
+    setTasks((current) => materializeDailyTasks(carryOverUnfinishedTasks(current, todayDate), todayDate))
   }, [tasks, todayDate])
 
   useEffect(() => {
@@ -327,6 +328,12 @@ export function App() {
     const normalizedDeadlineDate = normalizeDeadlineDate(deadlineDate)
     if (!title || (isDeadlines && !normalizedDeadlineDate) || (!isIdeas && !isDeadlines && !selectedDate)) return
     const normalizedDeadlineTime = normalizeReminderTime(deadlineTime)
+    if (selectedDay === 'today' && dailyFixed && !isIdeas && !isDeadlines) {
+      setTasks((current) => createDailyTaskSeries(current, title, selectedDate, crypto.randomUUID()))
+      setDraft('')
+      setDailyFixed(false)
+      return
+    }
     const nextTask = isIdeas
       ? { id: crypto.randomUUID(), title, completed: false, bucket: IDEA_BUCKET, ideaTags: [] }
       : isDeadlines
@@ -334,10 +341,12 @@ export function App() {
         : { id: crypto.randomUUID(), title, completed: false, date: selectedDate }
     setTasks((current) => [nextTask, ...current])
     setDraft('')
+    setDailyFixed(false)
     if (isDeadlines) setDeadlineTime('')
   }
 
   function editTask(task) {
+    setConfirmAction(null)
     setEditingReminderId(null)
     setReminderDraft('')
     setEditingTaskId(task.id)
@@ -345,12 +354,14 @@ export function App() {
       title: task.title || '',
       deadlineDate: task.bucket === DEADLINE_BUCKET ? task.deadlineDate || '' : '',
       deadlineTime: task.bucket === DEADLINE_BUCKET ? task.deadlineTime || '' : '',
+      reminderTime: task.dailyTemplateId ? task.reminderTime || '' : '',
     })
   }
 
   function cancelTaskEdit() {
+    setConfirmAction(null)
     setEditingTaskId(null)
-    setTaskEditor({ title: '', deadlineDate: '', deadlineTime: '' })
+    setTaskEditor({ title: '', deadlineDate: '', deadlineTime: '', reminderTime: '' })
   }
 
   function saveTaskEdit(event) {
@@ -364,6 +375,16 @@ export function App() {
     if (event.key !== 'Escape') return
     event.preventDefault()
     event.stopPropagation()
+    cancelTaskEdit()
+  }
+
+  function deleteDailyOccurrence(id) {
+    setTasks((current) => skipDailyTaskForDate(current, id))
+    cancelTaskEdit()
+  }
+
+  function stopDailySeries(id) {
+    setTasks((current) => stopDailyTaskSeries(current, id, dateLabel(0)))
     cancelTaskEdit()
   }
 
@@ -538,7 +559,15 @@ export function App() {
   }
 
   function restoreTask(id) {
-    setTasks((current) => current.map((task) => task.id === id ? { ...task, completed: false } : task))
+    setTasks((current) => {
+      const target = current.find((task) => task.id === id)
+      const template = target?.dailyTemplateId ? current.find((task) => task.id === target.dailyTemplateId && task.bucket === DAILY_TEMPLATE_BUCKET) : null
+      return current.map((task) => {
+        if (task.id !== id) return task
+        const reminderTime = normalizeReminderTime(template?.reminderTime)
+        return reminderTime ? { ...task, completed: false, reminderTime } : { ...task, completed: false }
+      })
+    })
   }
 
   function moveToIdeas(id) {
@@ -620,15 +649,22 @@ export function App() {
 
   function renderTaskEditor(task, completed = false) {
     const isDeadlineTask = task.bucket === DEADLINE_BUCKET
+    const isDailyTask = Boolean(task.dailyTemplateId)
     const saveDisabled = !taskEditor.title.trim() || (isDeadlineTask && !normalizeDeadlineDate(taskEditor.deadlineDate))
     return <>
       {completed && <span className="done-mark" aria-hidden="true">✓</span>}
-      <form className={`task-edit-form ${isDeadlineTask ? 'is-deadline' : ''}`} aria-label={`编辑待办：${task.title}`} onSubmit={saveTaskEdit} onKeyDown={handleTaskEditKeyDown}>
+      <form className={`task-edit-form ${isDeadlineTask ? 'is-deadline' : ''} ${isDailyTask ? 'is-daily' : ''}`} aria-label={`编辑待办：${task.title}`} onSubmit={saveTaskEdit} onKeyDown={handleTaskEditKeyDown}>
         <input className="task-edit-title" aria-label="待办标题" value={taskEditor.title} onChange={(event) => setTaskEditor((current) => ({ ...current, title: event.target.value }))} autoFocus />
         {isDeadlineTask && <span className="task-edit-deadline-fields">
           <label><CalendarBlank size={14} aria-hidden="true" /><input type="date" aria-label="截止日期" value={taskEditor.deadlineDate} onInput={(event) => { const value = event.currentTarget.value; setTaskEditor((current) => ({ ...current, deadlineDate: value })) }} required /></label>
           <label><Clock size={14} aria-hidden="true" /><input type="time" aria-label="截止时间（可选）" value={taskEditor.deadlineTime} onInput={(event) => { const value = event.currentTarget.value; setTaskEditor((current) => ({ ...current, deadlineTime: value })) }} /></label>
         </span>}
+        {isDailyTask && <label className="daily-edit-reminder"><span>每日提醒</span><input type="time" aria-label="每日提醒时间（可选）" value={taskEditor.reminderTime} onInput={(event) => { const value = event.currentTarget.value; setTaskEditor((current) => ({ ...current, reminderTime: value })) }} /></label>}
+        {isDailyTask && (confirmAction?.id === task.id ? (
+          <span className="daily-edit-confirm"><span>{confirmAction.type === 'delete-daily-occurrence' ? '只删除今天，明天仍会出现？' : '停止后，明天起不再出现？'}</span><button type="button" onClick={() => setConfirmAction(null)}>取消</button><button className="is-danger" type="button" onClick={() => confirmAction.type === 'delete-daily-occurrence' ? deleteDailyOccurrence(task.id) : stopDailySeries(task.id)}>确认</button></span>
+        ) : (
+          <span className="daily-edit-options"><small>名称与提醒会用于之后每天</small><button type="button" onClick={() => setConfirmAction({ type: 'delete-daily-occurrence', id: task.id })}>仅删除今天</button><button className="is-danger" type="button" onClick={() => setConfirmAction({ type: 'stop-daily-series', id: task.id })}>停止每日</button></span>
+        ))}
         <span className="task-edit-actions">
           <button className="task-edit-save" type="submit" disabled={saveDisabled}>保存</button>
           <button type="button" onClick={cancelTaskEdit}>取消</button>
@@ -652,7 +688,7 @@ export function App() {
             <div className="title-line"><h1>{isIdeas ? '想法' : isDeadlines ? 'DDL' : isHabits ? '习惯/计划' : isReviews ? '复盘' : '待办'}</h1><span className="active-count">{isHabits ? (activeHabit ? 1 : 0) : isReviews ? reviewCount : isNotebook ? noteTasks.length : active.length}</span></div>
             <div className="header-meta">
               {isIdeas ? <span className="mode-label">{isNotebook ? '轻量笔记本' : '随手记录'}</span> : isDeadlines ? <span className="mode-label">按截止日期排序</span> : isHabits ? <span className="mode-label">一次专注一个</span> : isReviews ? <span className="mode-label">问题变成行动</span> : <time dateTime={selectedDate}>{selectedDate}</time>}
-              <span className="version-label">v7.12.1 · Sync</span>
+              <span className="version-label">v7.13.0 · Sync</span>
               <button type="button" className={`cloud-status-button is-${cloud.status}`} aria-expanded={syncPanelOpen} onClick={() => setSyncPanelOpen((value) => !value)}>{cloudIcon()}<span>{cloud.session ? '已连接' : '云同步'}</span></button>
             </div>
           </header>
@@ -897,6 +933,7 @@ export function App() {
           {!isHabits && !isReviews && !isNotebook && <>
           <form className={isDeadlines ? 'deadline-add' : 'quick-add'} onSubmit={addTask}>
             <input className="task-draft-input" aria-label={isIdeas ? '输入新的想法' : isDeadlines ? '输入新的 DDL' : `输入${selectedDay === 'today' ? '今天' : '明天'}的新任务`} value={draft} onChange={(event) => setDraft(event.target.value)} placeholder={isIdeas ? '记下突然想到的事，回车添加' : isDeadlines ? '输入有截止日期的事项' : `输入${selectedDay === 'today' ? '今天' : '明天'}的任务，回车添加`} autoFocus={!isDesktop} />
+            {selectedDay === 'today' && !isIdeas && !isDeadlines && <button className={`daily-add-toggle ${dailyFixed ? 'is-active' : ''}`} type="button" aria-pressed={dailyFixed} onClick={() => setDailyFixed((value) => !value)}><span aria-hidden="true">↻</span>每日</button>}
             {isDeadlines && <span className="deadline-add-controls">
               <label><CalendarBlank size={15} aria-hidden="true" /><input type="date" aria-label="选择截止日期" value={deadlineDate} onChange={(event) => setDeadlineDate(event.target.value)} required /></label>
               <label><Clock size={15} aria-hidden="true" /><input type="time" aria-label="选择截止时间（可选）" value={deadlineTime} onInput={(event) => setDeadlineTime(event.currentTarget.value)} /></label>
@@ -913,6 +950,7 @@ export function App() {
                 <span className="task-copy">
                   <span className="task-title">{task.title}</span>
                   {selectedDay === 'today' && task.carryoverCount && <span className="task-carryover-label"><ArrowRight size={13} weight="bold" />{carryoverLabel(task)}</span>}
+                  {selectedDay === 'today' && task.dailyTemplateId && <span className="task-daily-label"><span aria-hidden="true">↻</span>每日固定</span>}
                   {isDeadlines && (() => { const status = deadlineStatus(task); return <span className="deadline-meta"><span className="deadline-date"><CalendarBlank size={13} weight="fill" />{task.deadlineDate}{task.deadlineTime ? ` · ${task.deadlineTime}` : ''}</span><span className={`deadline-status is-${status.key}`}>{status.label}</span></span> })()}
                   {selectedDay === 'today' && task.bucket === HABIT_BUCKET && <span className="task-habit-label"><Target size={13} weight="fill" />习惯/计划 · {habitMinimumLabel(task.habitMinimum)}</span>}
                   {selectedDay === 'today' && task.reminderTime && <span className="task-reminder-label"><Clock size={13} weight="fill" />今天 {task.reminderTime}</span>}
@@ -953,7 +991,7 @@ export function App() {
                         </button>}
                       </>
                     )}
-                    {task.bucket !== HABIT_BUCKET && <button className="move-task-button" type="button" onClick={() => moveToIdeas(task.id)}>转为想法</button>}
+                    {task.bucket !== HABIT_BUCKET && !task.dailyTemplateId && <button className="move-task-button" type="button" onClick={() => moveToIdeas(task.id)}>转为想法</button>}
                     <button className="task-edit-button" type="button" aria-label={`编辑待办：${task.title}`} title="编辑" onClick={() => editTask(task)}><PencilSimple size={15} /></button>
                   </span>
                 )}
