@@ -332,6 +332,7 @@ h1 { margin: 0; font-size: 38px; line-height: 1; letter-spacing: -.04em; font-we
 .review-card.is-improved { background: linear-gradient(145deg, rgba(247,253,250,.55), rgba(226,243,235,.4)); }
 .review-card-header { min-width: 0; overflow: hidden; display: flex; align-items: center; gap: 9px; }
 .review-card-icon { width: 32px; height: 32px; flex: 0 0 32px; display: grid; place-items: center; border-radius: 11px; color: #d07938; background: rgba(255,235,214,.72); }
+.review-card-icon.is-improved { color: #27865f; background: rgba(215,242,229,.8); }
 .review-card-title { min-width: 0; flex: 1; display: grid; gap: 2px; }
 .review-card-title strong { overflow: hidden; font-size: 14px; font-weight: 630; text-overflow: ellipsis; white-space: nowrap; }
 .review-card-title small { color: #7d8999; font-size: 10px; }
